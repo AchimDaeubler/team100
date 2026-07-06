@@ -1,0 +1,22 @@
+schema_version: "2026.04"
+status: done
+source: observability-alert-2026-04-01-0842
+tracking_id: ENAG-TSK-143
+created: 2026-04-01
+updated: 2026-04-01
+
+completion:
+  date: 2026-04-01
+  pull_requests:
+    - "https://github.com/trimble-transport/payments-service/pull/288"
+
+learnings:
+  - type: pattern_missing
+    summary: "No codebase-wide enforcement of CurrencyUtils.round() for monetary arithmetic"
+    context: >
+      This is the second bug (see SPEC-039) caused by using raw double
+      arithmetic instead of CurrencyUtils.round(). The utility exists but
+      nothing prevents new code from bypassing it. Consider a lint rule or
+      repo instruction.
+    tags: [currency, validation, code-quality, payment-service]
+    date: 2026-04-01

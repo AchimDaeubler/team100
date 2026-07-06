@@ -1,0 +1,58 @@
+---
+description: "Guardrails for SKILL.md file size — enforces progressive disclosure thresholds when agents edit skill files"
+globs:
+  - "**/SKILL.md"
+alwaysApply: false
+---
+
+# Skill Authoring Size Guardrails
+
+SKILL.md files are agent instructions where size directly impacts
+instruction-following fidelity. These thresholds prevent regression after
+progressive disclosure extraction.
+
+## Thresholds
+
+| Limit | Lines | Action |
+|-------|------:|--------|
+| **Soft limit** | 250 | Prefer extraction for new content; inline only if the file stays under 250 lines |
+| **Hard ceiling** | 400 | MUST extract before merging — the file is too large for reliable instruction-following |
+
+The upstream Agent Skills specification enforces a 500-line / 5,000-token
+absolute maximum. The 400-line ceiling keeps a safety margin below that
+authority.
+
+## After every SKILL.md edit
+
+1. Check the file's line count (`wc -l`).
+2. **Under 250 lines** — no action needed.
+3. **250–399 lines** — review whether new content can be extracted to
+   `references/`. Prefer extraction; inline only with justification.
+4. **400+ lines** — MUST extract content to `references/` before committing.
+   Do not commit a SKILL.md above 400 lines.
+
+## Extraction techniques (from SPEC-038 patterns)
+
+- **Conditional content → `references/`**: Move mode-specific, workflow-branch,
+  or role-specific sections into dedicated reference files. Use explicit load
+  triggers: `Read [references/X.md](references/X.md) when Y`.
+- **Inline cross-references replace prose**: A one-line `Apply [ref](ref)`
+  instruction replaces 20–40 lines of restated content without adding a
+  separate load step.
+- **User-profile compression**: Each skill keeps its "Optional user profile"
+  section under 10 lines — a check-and-apply instruction plus one-sentence
+  deltas for confirmations, explanation, and checkpoint tags.
+- **Shared references for repeated content**: When multiple skills restate the
+  same rules (lifecycle, spec format, user profile), a shared reference in
+  `.cursor/skills/_shared/` eliminates duplication.
+- **Keep per-execution reference loads to 2–5**: Extraction should not overload
+  context. If a single execution path loads more than 5 reference files,
+  consolidate related references.
+
+## What NOT to extract
+
+- The skill's core workflow steps — these must remain inline for reliable
+  instruction-following.
+- Frontmatter and the skill-integration pattern (description, activation
+  triggers, "When NOT to use" section).
+- Short conditional blocks (under 5 lines) that don't benefit from extraction.

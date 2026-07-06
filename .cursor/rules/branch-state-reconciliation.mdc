@@ -1,0 +1,85 @@
+---
+description: "Reconcile branch state before code-modifying work or starting a new unit of work — swap off merged PRs, refuse to swap on a dirty tree, and surface ambiguous PR state instead of guessing"
+alwaysApply: true
+---
+
+# Branch-state reconciliation
+
+Before any code-modifying work or before starting a new unit of work, make
+sure the current branch matches the ask. Apply this procedure regardless
+of which Creator skill (or no skill) is active.
+
+Do not override `branching.base_branch` or `branching.target_branch` from a
+spec's `meta.yaml`. Reconciliation chooses where the *current* turn should
+work; stacked- and integration-branch topologies are still honored when
+those fields are set.
+
+## Gather the state
+
+Collect four signals before deciding:
+
+1. **Current branch** — `git branch --show-current`.
+2. **Default-branch status** — compare the current branch to the short
+   name of `refs/remotes/origin/HEAD` (e.g.,
+   `git symbolic-ref --short refs/remotes/origin/HEAD`). Never compare
+   against a hardcoded `main` / `master`. If the symbolic-ref is missing
+   (fresh clone, no remote HEAD configured), treat the default-branch
+   identity as ambiguous; the documented recovery is
+   `git remote set-head origin -a`.
+3. **Working-tree cleanliness** — `git status --porcelain`. Empty output
+   means clean. Do not substitute `git diff --quiet` (it misses index-only
+   changes and untracked files).
+4. **PR state for the current branch** — when not on the default branch
+   and `gh` is available:
+
+   ```bash
+   gh pr list --head <branch> --state all --json state,mergedAt,url --limit 1
+   ```
+
+   Treat the PR as **merged** when `mergedAt != null` (the JSON timestamp
+   field), not by comparing `state` to a `MERGED` string — `state` is
+   `OPEN` / `CLOSED` and merged PRs appear as closed with a non-null
+   `mergedAt`. An empty array, a non-zero exit, or missing `gh` is
+   ambiguous PR state, not a "no PR exists" signal.
+
+## Reconcile on state (all modes)
+
+Pick exactly one outcome from the signals:
+
+- **Merged PR on the current branch → swap to default and pull.**
+  `git checkout <default-branch>` then `git pull --ff-only` before
+  proceeding. The merged work is on the default branch; staying on the
+  feature branch produces work that can't reach users without another PR.
+- **Dirty working tree → refuse to swap.** Do not change branches in any
+  mode, even when other signals call for it. Surface the pending changes
+  and ask the user to commit, stash, or discard first. This applies
+  uniformly to guided, safe-auto, expert, and streamlined.
+- **On the default branch with an ask to modify code → prompt for a
+  spec.** Recommend running `create-spec` (or whichever skill scopes the
+  work) before editing files on the default branch.
+- **Ambiguous state → refuse-and-ask.** When `gh` is unavailable, the PR
+  query returns empty, the PR is closed without merging, the branch is a
+  random non-`SPEC-*` / non-`planning-*` name with no PR, or
+  `refs/remotes/origin/HEAD` is missing, surface what was observed (the
+  four signals) and ask the user how to proceed. Do not infer "no PR
+  exists" from a tool failure.
+- **Otherwise → stay.** On a `SPEC-*` or `planning-*` branch with an open
+  PR (or no PR yet) and a clean tree, continue on the current branch.
+
+## Reconcile on intent (streamlined only)
+
+When `mode: streamlined` is active and the current branch has an **open**
+PR, also infer whether the user's ask is a follow-up to that PR (stay) or
+unrelated new work (offer to swap to default and start a new spec). If
+intent is unclear from the ask, surface the options instead of guessing.
+In all other modes, intent inference is the user's job — never swap based
+on guessed intent.
+
+## Narration
+
+Emit reconciliation actions as a `[NOTE]`. Visibility follows the per-mode
+grid in `.cursor/skills/_shared/agent-tags.md` — guided blocks, safe-auto
+informs, expert is silent, and streamlined is fully invisible (no pause,
+no trace). The dirty-tree refusal and the refuse-and-ask outcome always
+surface to the user regardless of mode, because they require user input
+before any work can proceed.

@@ -1,0 +1,35 @@
+schema_version: "2026.04"
+status: done
+source: "https://notion.so/trimble-tl/batch-payments-task-142"
+tracking_id: ENAG-TSK-142
+created: 2026-04-01
+updated: 2026-04-04
+
+completion:
+  date: 2026-04-04
+  pull_requests:
+    - "https://github.com/trimble-transport/payments-service/pull/287"
+
+learnings:
+  - type: pattern_discovered
+    summary: "Batch endpoints need intra-payload duplicate detection"
+    context: >
+      referenceId uniqueness was only checked against DB, not within the batch
+      request itself. Discovered during implementation when test data with
+      duplicates passed validation.
+    tags: [batch-processing, payment-endpoints, validation]
+    date: 2026-04-02
+  - type: constraint_found
+    summary: "Atomic batches of 100+ items risk transaction lock contention"
+    context: >
+      Reviewer flagged during PR review. Added 5-second SLA as performance
+      constraint. Larger batches need a different approach (chunking or saga).
+    tags: [batch-processing, performance, transactions]
+    date: 2026-04-03
+  - type: tooling_created
+    summary: "BatchTestHelper.java created for batch endpoint testing"
+    context: >
+      No existing test infrastructure for batch endpoints. Created reusable
+      helper. Future batch specs should reference it.
+    tags: [testing, batch-processing, test-infrastructure]
+    date: 2026-04-04

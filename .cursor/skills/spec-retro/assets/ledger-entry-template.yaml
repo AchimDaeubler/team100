@@ -1,0 +1,21 @@
+# Ledger entry template
+# Domain ledger files live at .spec/_ledger/{domain}.yaml
+# Domain names are emergent from tag clusters — not predefined.
+
+entries:
+  - type: pattern_discovered   # One of: pattern_discovered, pattern_missing,
+                                # constraint_found, assumption_invalidated,
+                                # assumption_confirmed, decision_made,
+                                # tooling_created, scope_deviation
+    summary: "One-line description of the learning"
+    context: >
+      Why this matters, how it was discovered. Include specific file paths,
+      pattern names, API behaviors, or error messages. Should be understandable
+      without reading the originating spec.
+    tags: [domain, specific-topic, related-concept]
+    date: 2026-04-03
+    source_spec: SPEC-042       # Originating spec ID for traceability
+
+    # Optional — added during retention review (Step 7):
+    # stale: true
+    # stale_reason: "Superseded by SPEC-055 which replaced the approach"
