@@ -69,6 +69,11 @@ def test_missing_path_raises(tmp_path: Path):
         read_commits(str(tmp_path / "does_not_exist"))
 
 
+def test_empty_repo_returns_no_commits(empty_repo: Path):
+    # A valid but empty repo (unborn HEAD) is not an error; it has no commits.
+    assert read_commits(str(empty_repo)) == []
+
+
 def test_non_repo_directory_raises(tmp_path: Path):
     # AC-8: an existing directory that is not a git repo errors clearly.
     plain = tmp_path / "plain"

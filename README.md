@@ -69,6 +69,12 @@ Then open <http://127.0.0.1:8000> in your browser.
 Each option also has an environment-variable equivalent: `REPO_PATH`,
 `MAX_COMMITS`, `HOST`, `PORT`.
 
+> **Security note:** the app binds to `127.0.0.1` (localhost) by default and has
+> no authentication. It is a single-user local tool. If you change `--host` to a
+> non-loopback address (e.g. `0.0.0.0`), the repository's commit metadata
+> (messages, author names/emails, the server-side repo path) becomes reachable
+> unauthenticated on your network. Only do this on a trusted network.
+
 ## API
 
 `GET /api/commits` returns JSON:

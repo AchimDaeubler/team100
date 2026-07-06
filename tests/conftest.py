@@ -64,6 +64,12 @@ class RepoBuilder:
 
 
 @pytest.fixture
+def empty_repo(tmp_path: Path) -> Path:
+    """An initialized repo with no commits (unborn HEAD)."""
+    return RepoBuilder(tmp_path / "empty").path
+
+
+@pytest.fixture
 def linear_repo(tmp_path: Path) -> Path:
     b = RepoBuilder(tmp_path / "linear")
     b.commit("first")

@@ -43,6 +43,12 @@ def test_index_page_served(linear_repo: Path):
     assert "Commit Graph" in resp.text  # AC-1: UI is served
 
 
+def test_empty_repo_returns_empty_graph(empty_repo: Path):
+    body = _client(empty_repo).get("/api/commits").json()
+    assert body["count"] == 0
+    assert body["commits"] == []
+
+
 def test_bad_repo_returns_clean_error(tmp_path: Path):
     body_resp = _client(tmp_path / "nope").get("/api/commits")
     assert body_resp.status_code == 400  # AC-8: clear error, no crash

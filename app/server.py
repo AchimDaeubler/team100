@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, parse_args
@@ -40,10 +40,7 @@ def create_app(settings: Settings) -> FastAPI:
             }
         )
 
-    @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
-
+    # StaticFiles(html=True) serves web/index.html at "/" and the JS/CSS assets.
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="static")
     return app
 
