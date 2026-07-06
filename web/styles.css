@@ -1,0 +1,93 @@
+:root {
+  --bg: #1e1e2e;
+  --panel: #181825;
+  --fg: #cdd6f4;
+  --muted: #9399b2;
+  --row-hover: #313244;
+  --border: #313244;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+header h1 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.repo {
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.error {
+  margin: 20px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #45283c;
+  border: 1px solid #f38ba8;
+  color: #f38ba8;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.graph {
+  padding: 8px 0;
+  overflow-x: auto;
+}
+
+.row-hit {
+  fill: transparent;
+}
+.row-hit:hover {
+  fill: var(--row-hover);
+}
+
+.node {
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+
+.edge {
+  fill: none;
+  stroke-width: 2;
+}
+
+.sha,
+.subject,
+.meta {
+  font-size: 12px;
+}
+
+.sha {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-weight: 600;
+}
+
+.subject {
+  fill: var(--fg);
+}
+
+.meta {
+  fill: var(--muted);
+}

@@ -1,5 +1,5 @@
 schema_version: "2026.04"
-status: ready
+status: done
 created: 2026-07-06
 updated: 2026-07-06
 
@@ -40,10 +40,48 @@ coordination:
 #     - "https://github.com/..."
 
 # Learnings (add during and after execution)
-# learnings:
-#   - type: pattern_discovered          # See references/spec-format.md for all types
-#     summary: ""
-#     context: ""
-#     tags: []
-#     date: 2026-07-06
+learnings:
+  - type: future_work
+    summary: "All-branches / all-refs graph view requested but deferred to a later spec."
+    context: >
+      The reader walks from HEAD only (matches default `git log`, per AC-3), so
+      unmerged branch tips are not shown. During co-coding the user asked to see
+      all branches; we chose to keep SPEC-001 HEAD-only and defer multi-ref
+      walking (push all refs into the pygit2 walker / `git log --all`) plus ref
+      decoration to a future spec, consistent with the scope boundaries.
+    tags: [scope, git-reader, branches]
+    date: 2026-07-06
+  - type: decision_made
+    summary: "pygit2 SortMode.TIME chosen to match default `git log` order (AC-3)."
+    context: >
+      AC-3 pins ordering to the default `git log` walk (reverse-chronological by
+      committer date, not --topo-order). pygit2 `SortMode.TIME` reproduces this;
+      a test asserts read_commits order equals `git log --pretty=%H` on a
+      branched fixture. `commit.author.time` (author) is used for the displayed
+      timestamp, distinct from committer time which drives ordering.
+    tags: [git-reader, ordering]
+    date: 2026-07-06
+  - type: pattern_discovered
+    summary: "Server computes lane + color; frontend is a dumb SVG renderer."
+    context: >
+      Greedy newest-first column reservation lives in app/graph.py and emits
+      {lane, color, edges[{to_lane, boundary}]} per commit. Boundary edges (parent
+      beyond the AC-9 cap) are flagged so the frontend draws a dashed stub instead
+      of a dangling line. This keeps the layout deterministic and unit-testable.
+    tags: [graph, architecture]
+    date: 2026-07-06
+  - type: constraint_discovered
+    summary: "Windows env: no preinstalled Python; static files reload without server restart."
+    context: >
+      The dev machine had only the Microsoft Store python stub; installed Python
+      3.12 via winget and used a .venv. FastAPI StaticFiles serves web/ fresh per
+      request, so frontend edits need no server restart, but app/*.py changes do
+      (no --reload configured). Port 8000 occasionally lingered between restarts;
+      freeing via Get-NetTCPConnection was needed.
+    tags: [windows, environment, dev-workflow]
+    date: 2026-07-06
 ready_sha: "d881f298b573e4ec61f8ced08e74d57bb35c4d4b"
+
+completion:
+  date: 2026-07-06
+  pull_requests: []
