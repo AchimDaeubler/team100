@@ -26,7 +26,9 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/api/commits")
     def get_commits() -> JSONResponse:
         try:
-            commits = read_commits(settings.repo_path, settings.max_commits)
+            commits = read_commits(
+                settings.repo_path, settings.max_commits, settings.all_refs
+            )
         except RepositoryError as exc:
             return JSONResponse(status_code=400, content={"error": str(exc)})
         graph = build_graph(commits)
@@ -34,6 +36,7 @@ def create_app(settings: Settings) -> FastAPI:
             {
                 "repo": settings.repo_path,
                 "max_commits": settings.max_commits,
+                "refs": "all" if settings.all_refs else "head",
                 "count": len(graph["commits"]),
                 "lane_count": graph["lane_count"],
                 "commits": graph["commits"],

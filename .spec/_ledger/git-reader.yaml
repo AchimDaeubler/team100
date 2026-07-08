@@ -14,3 +14,24 @@ entries:
     tags: [git-reader, ordering, pygit2, git-log]
     date: 2026-07-08
     source_spec: SPEC-001
+  - type: pattern_discovered
+    summary: "Walk all refs in pygit2 by seeding one walker from every peeled ref tip."
+    context: >
+      To show more than HEAD's history, create a single walker with
+      `repo.walk(None, pygit2.enums.SortMode.TIME)` and call `walker.push(oid)`
+      once per tip, rather than one walk per ref. Enumerate tips from
+      `refs/heads/*` (local), `refs/remotes/*` (remote-tracking), and
+      `refs/tags/*`, plus HEAD; peel each with `Reference.peel(pygit2.Commit)`
+      (annotated tags peel through; lightweight tags/branches are already
+      commits) and skip refs that don't peel to a commit (tag-of-tree/blob,
+      dangling `refs/remotes/origin/HEAD`); dedupe tips by OID. The HEAD-only
+      path is the same code with a single pushed tip, so both modes share one
+      walker. Subprocess fallback/oracle: `git log --branches --remotes --tags`
+      (drop the flags for HEAD-only). The server cap applies to the merged
+      stream (newest N across all refs, not per-branch), and reading refs never
+      mutates the repo — the app still never fetches, so remote branches appear
+      only if already fetched. Use `pygit2.enums.SortMode` (the `GIT_SORT_*`
+      constants were removed in pygit2 1.20).
+    tags: [git-reader, all-refs, pygit2, remotes, git-log]
+    date: 2026-07-08
+    source_spec: SPEC-002

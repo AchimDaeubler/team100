@@ -10,9 +10,18 @@ import pytest
 from app.git_reader import RepositoryError, read_commits
 
 
-def _git_log_shas(repo: Path, max_count: int) -> list[str]:
+def _git_log_shas(repo: Path, max_count: int, all_refs: bool = False) -> list[str]:
+    ref_args = ["--branches", "--remotes", "--tags"] if all_refs else []
     out = subprocess.run(
-        ["git", "-C", str(repo), "log", f"--max-count={max_count}", "--pretty=format:%H"],
+        [
+            "git",
+            "-C",
+            str(repo),
+            "log",
+            *ref_args,
+            f"--max-count={max_count}",
+            "--pretty=format:%H",
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -80,3 +89,99 @@ def test_non_repo_directory_raises(tmp_path: Path):
     plain.mkdir()
     with pytest.raises(RepositoryError):
         read_commits(str(plain))
+
+
+# --- all-refs mode (SPEC-002) ------------------------------------------------
+
+
+def test_all_refs_includes_unmerged_branch(unmerged_repo: Path):
+    # AC-1: commits on an unmerged branch are invisible HEAD-only but present
+    # in all-refs mode.
+    head_subjects = {c.subject for c in read_commits(str(unmerged_repo))}
+    assert "Feature: work b" not in head_subjects
+    assert len(head_subjects) == 3
+
+    all_subjects = {c.subject for c in read_commits(str(unmerged_repo), all_refs=True)}
+    assert {"Feature: work a", "Feature: work b"} <= all_subjects
+    assert len(all_subjects) == 5
+
+
+def test_head_only_default_unchanged(unmerged_repo: Path):
+    # AC-7: default remains HEAD-only, byte-for-byte equal to git log.
+    expected = _git_log_shas(unmerged_repo, 500, all_refs=False)
+    actual = [c.sha for c in read_commits(str(unmerged_repo))]
+    assert actual == expected
+
+
+def test_all_refs_includes_tag_only_history(tagged_side_history_repo: Path):
+    # AC-2: history reachable only via tags (annotated peeled + lightweight) is
+    # included; HEAD-only sees just the two main commits.
+    head = {c.subject for c in read_commits(str(tagged_side_history_repo))}
+    assert head == {"Main: first", "Main: second"}
+
+    all_subjects = {
+        c.subject for c in read_commits(str(tagged_side_history_repo), all_refs=True)
+    }
+    assert {"Side: one", "Side: two"} <= all_subjects
+
+
+def test_all_refs_order_matches_git_log_all(branched_repo: Path):
+    # AC-3: all-refs order equals `git log --branches --tags` exactly. No topo.
+    expected = _git_log_shas(branched_repo, 500, all_refs=True)
+    actual = [c.sha for c in read_commits(str(branched_repo), all_refs=True)]
+    assert actual == expected
+
+
+def test_all_refs_order_matches_git_log_unmerged(unmerged_repo: Path):
+    # AC-3 on a genuinely unmerged history (branched_repo's feature is merged).
+    expected = _git_log_shas(unmerged_repo, 500, all_refs=True)
+    actual = [c.sha for c in read_commits(str(unmerged_repo), all_refs=True)]
+    assert actual == expected
+
+
+def test_all_refs_cap_picks_newest_across_refs(unmerged_repo: Path):
+    # AC-6: the cap limits the merged stream to the newest N across all refs.
+    full = read_commits(str(unmerged_repo), max_commits=500, all_refs=True)
+    assert len(full) == 5
+    capped = read_commits(str(unmerged_repo), max_commits=3, all_refs=True)
+    assert len(capped) == 3
+    assert [c.sha for c in capped] == [c.sha for c in full[:3]]
+
+
+def test_all_refs_disconnected_histories_all_present(orphan_repo: Path):
+    # AC-5: every root's history is walked in all-refs mode.
+    head = {c.subject for c in read_commits(str(orphan_repo))}
+    assert head == {"Main: first", "Main: second"}
+    all_subjects = {c.subject for c in read_commits(str(orphan_repo), all_refs=True)}
+    assert all_subjects == {
+        "Main: first",
+        "Main: second",
+        "Orphan: first",
+        "Orphan: second",
+    }
+
+
+def test_all_refs_bad_repo_still_raises(tmp_path: Path):
+    # AC-8: error handling unchanged in all-refs mode.
+    with pytest.raises(RepositoryError):
+        read_commits(str(tmp_path / "nope"), all_refs=True)
+
+
+def test_all_refs_includes_remote_tracking_branches(remote_tracking_repo: Path):
+    # AC-10: commits reachable only from refs/remotes/* appear in all-refs mode
+    # but not HEAD-only.
+    head = {c.subject for c in read_commits(str(remote_tracking_repo))}
+    assert head == {"Local: first"}
+    assert "Remote: only-b" not in head
+
+    all_subjects = {
+        c.subject for c in read_commits(str(remote_tracking_repo), all_refs=True)
+    }
+    assert {"Remote: only-a", "Remote: only-b", "Upstream: base"} <= all_subjects
+
+
+def test_all_refs_order_matches_git_log_with_remotes(remote_tracking_repo: Path):
+    # AC-3 including remote-tracking refs.
+    expected = _git_log_shas(remote_tracking_repo, 500, all_refs=True)
+    actual = [c.sha for c in read_commits(str(remote_tracking_repo), all_refs=True)]
+    assert actual == expected
