@@ -1,0 +1,33 @@
+---
+description: "Shell environment hygiene — never leave persistent env vars set in the shared stateful shell"
+alwaysApply: true
+---
+
+# Shell environment hygiene
+
+The shell session is **stateful**: environment variables set in one command
+persist into every later command in the session. Setting a variable and
+forgetting to unset it silently changes the behavior of unrelated later
+commands.
+
+## Rules
+
+- NEVER export a variable in the shared shell that is meant for a single
+  command. Scope it to that command instead:
+  - PowerShell: `$env:FOO='bar'; some-command` only affects the process if you
+    reset/remove it after — prefer `& { $env:FOO='bar'; some-command }` or set
+    then `Remove-Item Env:FOO` immediately, or pass the value inline.
+  - POSIX shells: use `FOO=bar some-command` (single-command scope), not
+    `export FOO=bar`.
+- BE ESPECIALLY CAREFUL with `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE`. Leaving
+  them set backdates **every** subsequent `git commit`. In SPEC-001 this
+  backdated a whole branch to a fake date and required a `git filter-branch`
+  rewrite + force-push to repair.
+- When a subprocess needs special env (e.g. deterministic commit dates in test
+  fixtures), pass it via the subprocess's own `env=` argument, not the shared
+  shell. This is why SPEC-001's pytest fixtures were unaffected.
+
+## After setting any env var for a task
+
+Unset it (`Remove-Item Env:FOO` / `unset FOO`) as soon as the task is done, or
+verify it is empty before running commands whose behavior it could change.

@@ -1,0 +1,16 @@
+entries:
+  - type: decision_made
+    summary: "Match default `git log` order with pygit2 SortMode.TIME; report author time separately."
+    context: >
+      When reading a local git repo for display, the default `git log` order is
+      reverse-chronological by committer date with the parent-before-child
+      guarantee — NOT `--topo-order`. pygit2 `repo.walk(head, SortMode.TIME)`
+      reproduces this. Verify parity with a test asserting the reader's SHA order
+      equals `git log --pretty=%H` on a branched fixture. Note the split between
+      ordering and display: committer time drives ordering, but the shown
+      timestamp is the author time (`commit.author.time`). pygit2 is a good
+      no-git-binary primary reader (Windows wheels bundle libgit2) with a
+      `git log --pretty=format:%H%x00%P%x00...` subprocess as a fallback oracle.
+    tags: [git-reader, ordering, pygit2, git-log]
+    date: 2026-07-08
+    source_spec: SPEC-001

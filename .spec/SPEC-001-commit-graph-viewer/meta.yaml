@@ -1,0 +1,101 @@
+schema_version: "2026.04"
+status: done
+created: 2026-07-06
+updated: 2026-07-06
+
+# Origin (optional — informational, not a dependency)
+# source: "https://..."                 # Shareable origin breadcrumb, never a local filesystem path like /home/... or /Users/...
+# tracking_id: ""                       # External reference (Notion task, Jira ticket, etc.)
+
+# Dependencies (optional — advisory ordering, not execution blockers)
+# depends_on:
+#   - "SPEC-030"                        # Lightweight sequencing; upstream should usually be done first
+# blocked_by:
+#   - spec: "SPEC-030"
+#     until_status: "ready"            # required; ready | done
+
+# Coordination (optional — blast radius classification for parallel work)
+coordination:
+  blast_radius: structural             # structural | isolated | mixed
+  parallel_safe: false                 # true only when blast_radius is isolated; do not set independently
+
+# Branching (optional — non-default branch topology for stacked or integration workflows)
+# branching:
+#   base_branch: ""                    # Branch to fork from; defaults to repo default branch when absent
+#   target_branch: ""                  # PR base branch; defaults to repo default branch when absent
+
+# Freshness snapshot (populate when status reaches ready)
+# ready_sha: ""                         # Full git HEAD commit recorded at the ready transition; used for advisory staleness checks
+
+# Completion (populate when status reaches done)
+# completion:
+#   date: 2026-07-06
+#   acceptance_criteria_waived:         # Omit if none waived
+#     - acceptance_criteria: ""
+#       rationale: ""
+#   self_review_waived:                 # Omit if none waived; pr-review blocking findings the user accepted to proceed
+#     - finding: ""
+#       rationale: ""
+#   pull_requests:
+#     - "https://github.com/..."
+
+# Learnings (add during and after execution)
+learnings:
+  - type: future_work
+    summary: "All-branches / all-refs graph view requested but deferred to a later spec."
+    context: >
+      The reader walks from HEAD only (matches default `git log`, per AC-3), so
+      unmerged branch tips are not shown. During co-coding the user asked to see
+      all branches; we chose to keep SPEC-001 HEAD-only and defer multi-ref
+      walking (push all refs into the pygit2 walker / `git log --all`) plus ref
+      decoration to a future spec, consistent with the scope boundaries.
+    tags: [scope, git-reader, branches]
+    date: 2026-07-06
+  - type: decision_made
+    summary: "pygit2 SortMode.TIME chosen to match default `git log` order (AC-3)."
+    context: >
+      AC-3 pins ordering to the default `git log` walk (reverse-chronological by
+      committer date, not --topo-order). pygit2 `SortMode.TIME` reproduces this;
+      a test asserts read_commits order equals `git log --pretty=%H` on a
+      branched fixture. `commit.author.time` (author) is used for the displayed
+      timestamp, distinct from committer time which drives ordering.
+    tags: [git-reader, ordering]
+    date: 2026-07-06
+  - type: pattern_discovered
+    summary: "Server computes lane + color; frontend is a dumb SVG renderer."
+    context: >
+      Greedy newest-first column reservation lives in app/graph.py and emits
+      {lane, color, edges[{to_lane, boundary}]} per commit. Boundary edges (parent
+      beyond the AC-9 cap) are flagged so the frontend draws a dashed stub instead
+      of a dangling line. This keeps the layout deterministic and unit-testable.
+    tags: [graph, architecture]
+    date: 2026-07-06
+  - type: constraint_discovered
+    summary: "Windows env: no preinstalled Python; static files reload without server restart."
+    context: >
+      The dev machine had only the Microsoft Store python stub; installed Python
+      3.12 via winget and used a .venv. FastAPI StaticFiles serves web/ fresh per
+      request, so frontend edits need no server restart, but app/*.py changes do
+      (no --reload configured). Port 8000 occasionally lingered between restarts;
+      freeing via Get-NetTCPConnection was needed.
+    tags: [windows, environment, dev-workflow]
+    date: 2026-07-06
+  - type: constraint_discovered
+    summary: "Setting GIT_*_DATE in the stateful shell silently backdated every later commit."
+    context: >
+      While building a demo repo for screenshots, GIT_AUTHOR_DATE/GIT_COMMITTER_DATE
+      were exported in the shared, stateful shell and never unset. Because the shell
+      session persists across tool calls, all subsequent SPEC-001 commits inherited
+      the fake date (2026-01-01) and had to be rewritten via git filter-branch and
+      force-pushed. Lesson: never leave persistent env vars (especially GIT_*_DATE)
+      set in the shared shell; scope them to the single command (test fixtures set
+      env per-subprocess, which is why they were unaffected). Promoted to
+      .cursor/rules/shell-env-hygiene.mdc.
+    tags: [shell, environment, git, process]
+    date: 2026-07-08
+ready_sha: "d881f298b573e4ec61f8ced08e74d57bb35c4d4b"
+
+completion:
+  date: 2026-07-06
+  pull_requests:
+    - "https://github.com/AchimDaeubler/team100/pull/2"

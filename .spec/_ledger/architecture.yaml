@@ -1,0 +1,16 @@
+entries:
+  - type: pattern_discovered
+    summary: "Compute graph layout server-side; keep the frontend a dumb renderer."
+    context: >
+      For the commit-graph viewer, the greedy newest-first lane-assignment
+      algorithm lives server-side (app/graph.py) and emits per-commit
+      {lane, color, edges[{to_lane, boundary}]}. The browser only draws from that
+      payload. Benefits: the layout is deterministic and unit-testable in
+      isolation, and edge cases (merge convergence, octopus merges, parents beyond
+      the fetched cap flagged as boundary edges for a dashed off-screen stub) are
+      validated with pytest rather than in the DOM. General principle: when a
+      layout/derivation is testable and deterministic, compute it on the server
+      and ship a minimal render-only client.
+    tags: [architecture, graph, server-side, testability]
+    date: 2026-07-08
+    source_spec: SPEC-001
