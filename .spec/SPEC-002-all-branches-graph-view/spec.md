@@ -2,7 +2,7 @@
 id: SPEC-002
 title: "All-branches / all-refs commit graph view"
 category: feature
-owner: achim.daeubler                         # git config user.name
+owner: celvink                         # git config user.name
 authored_by: augmented                # augmented | automated
 ---
 
@@ -21,11 +21,12 @@ slice reachable from the current checkout. Without this, the tool can't answer
 "what branches exist and how do they relate?", which is the primary reason to
 look at a graph rather than a linear log.
 
-This spec extends the git-reading layer to walk from **all refs** (local
-branches, tags, and `HEAD`) instead of `HEAD` alone, so the existing lane and
-rendering layers display the full branch/merge structure. It reuses the
-SPEC-001 lane algorithm, API shape, and frontend renderer unchanged wherever
-possible.
+This spec extends the git-reading layer to walk from **all refs** (branches —
+local *and* remote-tracking — tags, and `HEAD`) instead of `HEAD` alone, so the
+existing lane and rendering layers display the full branch/merge structure. It
+reuses the SPEC-001 lane algorithm, API shape, and frontend renderer unchanged
+wherever possible. The app never fetches (read-only), so remote-tracking
+branches only appear when they have already been fetched into `refs/remotes/*`.
 
 ## Acceptance criteria
 
@@ -39,12 +40,11 @@ possible.
    otherwise-unreachable history are included in all-refs mode. Annotated tags
    are peeled to the commit they ultimately reference.
 3. In all-refs mode the set and ordering of returned commits (before the AC-6
-   cap is applied) equals the default order of the equivalent local-ref
-   `git log` invocation on the golden fixture repos — reverse-chronological by
-   committer date (Git's default; this does NOT itself guarantee
-   parent-before-child ordering — see Research), verified by asserting equality
-   against that exact invocation (`git log --branches --tags`, which on
-   remote-free fixtures equals `git log --all`). No `--topo-order`.
+   cap is applied) equals the default order of the equivalent all-ref `git log`
+   invocation on the golden fixture repos — reverse-chronological by committer
+   date (Git's default; this does NOT itself guarantee parent-before-child
+   ordering — see Research), verified by asserting equality against that exact
+   invocation (`git log --branches --remotes --tags`). No `--topo-order`.
 4. Two branches that diverged from a common ancestor and were never merged are
    rendered in distinct lanes, each terminating at its own branch tip, with no
    fabricated merge edge between them.
@@ -66,6 +66,11 @@ possible.
    blank page) in all-refs mode.
 9. The README documents the new mode: how to enable/disable all-refs, what it
    shows, and the default; the documented steps succeed on a clean checkout.
+10. In all-refs mode, commits reachable only from remote-tracking branches
+    (`refs/remotes/*`, e.g. after a `git fetch`) are included in the
+    `/api/commits` response and the rendered graph. The app itself never
+    fetches — it only reads refs already present in the repository
+    (read-only NFR unchanged).
 
 ## Research
 
@@ -115,14 +120,17 @@ from `.spec/_ledger/{git-reader,architecture}.yaml` and SPEC-001's `meta.yaml`.
   `InvalidSpecError`/`GIT_EPEEL`) and dedupe tips by OID. Use
   `pygit2.enums.SortMode` (the `GIT_SORT_*` constants are removed in pygit2
   1.20). (docs-researcher)
-- **Ref scope = local only; use `--branches --tags` (+ HEAD), not `--all`.**
-  `git log --all` includes `refs/remotes/*` and notes; SPEC-002 excludes
-  remotes, so the subprocess fallback and the golden oracle use
-  `git log --branches --tags` (equal to `--all` on remote-free fixtures). The
-  cap (`--max-count`) applies to the single merged, ordered stream — the newest
-  N across all refs, not per-branch — so a branch with only old commits can
-  fall entirely outside the window; that is truncation, not an unmerged tip,
-  and tests must not conflate the two. (docs-researcher, prior-art-researcher)
+- **Ref scope = branches (local + remote-tracking) + tags; use
+  `--branches --remotes --tags` (+ HEAD).** The subprocess fallback and the
+  golden oracle use `git log --branches --remotes --tags`; the pygit2 path
+  enumerates `refs/heads/*`, `refs/remotes/*`, and `refs/tags/*`. (Scope note:
+  remotes were pulled in after the initial local-only implementation — see the
+  `scope_changed` learning.) The app never fetches, so remote-tracking refs
+  only appear if already present. The cap (`--max-count`) applies to the single
+  merged, ordered stream — the newest N across all refs, not per-branch — so a
+  branch with only old commits can fall entirely outside the window; that is
+  truncation, not an unmerged tip, and tests must not conflate the two.
+  (docs-researcher, prior-art-researcher)
 - **Fixture-building hazard.** New fixtures (unmerged branch, tag-on-side-
   history, orphan/disconnected root) need deterministic dates. Per SPEC-001's
   hard-won learning (promoted to `.cursor/rules/shell-env-hygiene.mdc`), set
@@ -140,9 +148,6 @@ Explicitly OUT of scope for this spec (candidates for later specs):
 - **Ref decoration / labels** — drawing branch, tag, and `HEAD` name labels on
   or next to nodes. This spec only makes the commits *visible*; naming which
   ref points where is a separate spec.
-- **Remote-tracking branches (`refs/remotes/*`)** — this spec walks local
-  branches, tags, and `HEAD` only. Remote refs are a later addition. (Note: on
-  fixtures without remotes, this does not change `git log --all` equality.)
 - Per-branch show/hide toggles or an interactive ref selector in the UI — mode
   is fixed at startup, matching SPEC-001's no-runtime-config boundary.
 - Commit detail view, diffs, search/filtering, in-UI repo picker (still later
@@ -186,16 +191,16 @@ ordered commit list and render whatever tips appear in-window.
     (e.g. `all_refs: bool = False`) threaded into both backends; **default
     `False` keeps HEAD-only behavior byte-for-byte**. `pygit2`: create
     `walker = repo.walk(None, pygit2.enums.SortMode.TIME)` and `walker.push(oid)`
-    for each resolved tip. Enumerate via `repo.branches.local` +
-    `repo.references.iterator(...)` for tags, plus `HEAD`; `.resolve()` symbolic
-    refs before `.target`; **peel annotated tags** with
-    `Reference.peel(pygit2.Commit)` (lightweight tags are already commits);
-    skip refs that don't peel to a commit (catch `InvalidSpecError`/`GIT_EPEEL`);
+    for each resolved tip. Enumerate every ref under `refs/heads/*`,
+    `refs/remotes/*`, and `refs/tags/*`, plus `HEAD`; **peel** each with
+    `Reference.peel(pygit2.Commit)` (lightweight tags/branches are already
+    commits; annotated tags peel through); skip refs that don't peel to a
+    commit (e.g. tag-of-tree/blob, dangling `refs/remotes/origin/HEAD`);
     dedupe tips by OID; if no pushable tips remain, return `[]`. Keep the
     empty/unborn-HEAD guard unchanged. `git log` fallback: use
-    `git log --branches --tags` (local scope; equals `--all` on remote-free
-    repos) with the same `--max-count`/`--pretty`. Preserve the HEAD-only path
-    and `CommitRecord`/`RepositoryError` semantics unchanged.
+    `git log --branches --remotes --tags` with the same `--max-count`/`--pretty`.
+    Preserve the HEAD-only path and `CommitRecord`/`RepositoryError` semantics
+    unchanged.
   - `app/config.py` — add a startup setting for ref mode (e.g. `--all-refs`
     flag or `--refs {head,all}`) with an env-var equivalent, following the
     existing `Settings`/`parse_args` pattern and `DEFAULT_*` constants.
@@ -207,8 +212,9 @@ ordered commit list and render whatever tips appear in-window.
     touch if a real rendering bug surfaces with multiple independent tips.
   - `README.md` — document the new mode, its default, and the toggle (AC-9).
   - `tests/conftest.py` — add fixtures: an unmerged-branch repo (branch tip not
-    reachable from HEAD), a tags-pointing-at-side-history repo, and a
-    disconnected/orphan-history repo.
+    reachable from HEAD), a tags-pointing-at-side-history repo, a
+    disconnected/orphan-history repo, and a remote-tracking-branch repo (a
+    fetched `refs/remotes/*` tip not reachable from any local ref, for AC-10).
   - `tests/test_git_reader.py`, `tests/test_graph.py`, `tests/test_api.py` —
     add all-refs cases; keep existing HEAD-only assertions intact.
 - **Files NOT to modify:** anything under `.cursor/` and `.spec/` (Creator
@@ -219,7 +225,7 @@ ordered commit list and render whatever tips appear in-window.
   - Mirror SPEC-001's dual-backend reader structure: implement all-refs for
     both the `pygit2` path and the `git log` subprocess fallback, and keep the
     subprocess path as the ordering oracle for the AC-3 equality test (now
-    `git log --all`).
+    `git log --branches --remotes --tags`).
   - Reuse `CommitRecord` and `build_graph` unchanged; the greedy lane algorithm
     already claims a fresh lane for any in-window tip not reserved by a child,
     which is exactly what unmerged branch tips and extra roots need.
@@ -228,8 +234,10 @@ ordered commit list and render whatever tips appear in-window.
 - **Test expectations:**
   - Reader: an unmerged branch's commits appear in all-refs output but NOT in
     HEAD-only output (AC-1); tag-only history appears and annotated tags are
-    peeled (AC-2); all-refs order equals `git log --all` on a branched fixture
-    (AC-3); cap still limits count and picks newest across refs (AC-6).
+    peeled (AC-2); all-refs order equals `git log --branches --remotes --tags`
+    on a branched fixture (AC-3); a remote-tracking-only commit appears in
+    all-refs but not HEAD-only (AC-10); cap still limits count and picks newest
+    across refs (AC-6).
   - Graph: two unmerged branches occupy distinct lanes with no spurious merge
     edge (AC-4); disconnected roots each render on their own lane with NO edge
     whose endpoint is in an unrelated history (AC-5 — assert edges only ever

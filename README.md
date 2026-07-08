@@ -14,6 +14,9 @@ It never writes to the target repository.
 - Renders a commit graph in the browser as SVG: nodes, branch/merge edges, and
   parallel development in separate colored lanes.
 - Newest-first ordering matching the default `git log`.
+- Optional **all-refs mode** to walk every branch (local and remote-tracking)
+  and tag (not just `HEAD`), so unmerged branches, remote branches, and side
+  histories are visible.
 - Server-side commit cap (default 500) so it stays responsive on large repos.
 - Clear error message when pointed at a path that is not a git repository.
 
@@ -63,11 +66,40 @@ Then open <http://127.0.0.1:8000> in your browser.
 |--------|---------|-------------|
 | `repo_path` (positional) | `.` or `$REPO_PATH` | Path to the local git repository |
 | `--max-commits` | `500` | Maximum commits returned (applied server-side) |
+| `--all-refs` | *off* (HEAD-only) | Walk all branches (local + remote-tracking) and tags, not just `HEAD` |
 | `--host` | `127.0.0.1` | Bind host |
 | `--port` | `8000` | Bind port |
 
 Each option also has an environment-variable equivalent: `REPO_PATH`,
-`MAX_COMMITS`, `HOST`, `PORT`.
+`MAX_COMMITS`, `ALL_REFS`, `HOST`, `PORT`.
+
+### Viewing all branches (all-refs mode)
+
+By default the viewer walks history from `HEAD` only, exactly like `git log`, so
+commits that live solely on other branches (unmerged feature branches, tags
+pointing at side histories, orphan/disconnected histories) are not shown.
+
+Pass `--all-refs` to instead seed the walk from **every branch — local and
+remote-tracking — every tag, and `HEAD`** — equivalent to
+`git log --branches --remotes --tags`. Annotated tags are peeled to the commit
+they reference. Remote branches appear once they have been fetched (the app is
+read-only and never fetches for you); run `git fetch` yourself first if you want
+the latest remote refs reflected.
+
+```bash
+python -m app.server /path/to/your/repo --all-refs
+```
+
+```powershell
+# Windows (PowerShell) — flag or environment variable
+python -m app.server C:\path\to\your\repo --all-refs
+$env:ALL_REFS = "1"; python -m app.server C:\path\to\your\repo
+```
+
+The commit cap (`--max-commits`) still applies to the merged stream: you get the
+most recent commits across all refs, and parents that fall outside that window
+are drawn as boundary edges. The default remains HEAD-only, so existing behavior
+is unchanged unless you opt in.
 
 > **Security note:** the app binds to `127.0.0.1` (localhost) by default and has
 > no authentication. It is a single-user local tool. If you change `--host` to a
@@ -83,6 +115,7 @@ Each option also has an environment-variable equivalent: `REPO_PATH`,
 {
   "repo": "/path/to/repo",
   "max_commits": 500,
+  "refs": "head",          // "head" (default) or "all" when --all-refs is set
   "count": 6,
   "lane_count": 2,
   "commits": [
@@ -134,7 +167,8 @@ tests/            # pytest suite + golden fixture repositories
 
 ## Scope
 
-This is the foundational slice. Out of scope for now: commit detail/diff view,
-branch/tag/HEAD ref decoration, an in-UI repo picker, showing all branches
-(currently walks from `HEAD` like `git log`), search/filtering, and pagination
-beyond the fixed cap.
+This slice reads commits (from `HEAD` or, with `--all-refs`, from all branches
+— local and remote-tracking — and tags) and renders them. Out of scope for now:
+commit detail/diff view, branch/tag/HEAD ref decoration (drawing ref name labels
+on nodes), an in-UI repo picker or per-branch toggles, search/filtering, and
+pagination beyond the fixed cap.

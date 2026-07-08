@@ -1,5 +1,5 @@
 schema_version: "2026.04"
-status: ready
+status: done
 created: 2026-07-08
 updated: 2026-07-08
 
@@ -36,11 +36,71 @@ coordination:
 #   pull_requests:
 #     - "https://github.com/..."
 
-# Learnings (add during and after execution)
-# learnings:
-#   - type: pattern_discovered          # See references/spec-format.md for all types
-#     summary: ""
-#     context: ""
-#     tags: []
-#     date: 2026-07-08
+learnings:
+  - type: pattern_discovered
+    summary: >
+      pygit2 multi-tip walk: seed with repo.walk(None, SortMode.TIME) then
+      walker.push(oid) per resolved tip; peel every ref to pygit2.Commit and
+      skip refs that don't peel (tag-of-tree/blob).
+    context: >
+      Enumerated refs via `for name in repo.references` filtered to
+      refs/heads/* and refs/tags/*, plus repo.head, deduping OIDs. The
+      HEAD-only path was refactored onto the same walker+push(single tip)
+      shape with no behavior change, so both modes share one code path.
+    tags: [pygit2, git-reader, all-refs]
+    date: 2026-07-08
+  - type: decision_made
+    summary: >
+      Kept SortMode.TIME (no --topo-order) for AC-3 parity with
+      `git log --branches --tags`; added an equal-timestamp fixture as a
+      lane-algorithm sanity guard rather than switching sort modes.
+    context: >
+      The greedy lane algorithm implicitly assumes children precede parents,
+      which holds for strictly increasing fixture timestamps. The
+      equal_timestamp_repo fixture exercises the tie case and asserts edges
+      only ever reference real parents.
+    tags: [ordering, graph, testing]
+    date: 2026-07-08
+  - type: constraint_discovered
+    summary: >
+      Tests were not executed during this run per the user's "never run any
+      tests" rule; every AC was verified by code inspection instead.
+    context: >
+      Test files were authored per the spec's test expectations but pytest
+      was never invoked. AC verification and self-review relied on reading
+      the code and tests rather than runtime results.
+    tags: [process, testing]
+    date: 2026-07-08
+  - type: scope_changed
+    summary: >
+      Remote-tracking branches (refs/remotes/*) were pulled INTO scope after
+      the initial implementation, at the user's direction — the original spec
+      had deferred them.
+    context: >
+      All-refs now walks heads + remotes + tags (git log --branches --remotes
+      --tags) instead of local-only. The app still never fetches (read-only),
+      so remotes only appear if already fetched. Spec ACs, README, and tests
+      were updated to match.
+    tags: [scope, remotes, git-reader]
+    date: 2026-07-08
+  - type: future_work
+    summary: >
+      Branch-aware node coloring and ref labels are a candidate for a future
+      spec (ref decoration).
+    context: >
+      Today colors map to the lane/column index (app/graph.py _color), not to
+      the ref a commit belongs to, so a remote branch tip can share the
+      mainline's color when it lands in lane 0. Coloring or labeling by ref
+      identity (e.g. remotes vs local vs tags, or per-branch hues) needs the
+      reader to carry ref membership through to the graph layer and a
+      ref-based coloring/labeling strategy. Out of scope for SPEC-002, which
+      only makes the commits visible. User reviewed this and chose to leave
+      the lane-based coloring as-is.
+    tags: [future_work, graph, ref-decoration, ux]
+    date: 2026-07-08
+
 ready_sha: "2bebf33409817836dca5fe8735c8d7b5a89a4aa8"
+
+completion:
+  date: 2026-07-08
+  pull_requests: []

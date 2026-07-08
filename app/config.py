@@ -14,6 +14,15 @@ from dataclasses import dataclass
 DEFAULT_MAX_COMMITS = 500
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+DEFAULT_ALL_REFS = False  # HEAD-only by default (matches SPEC-001 / `git log`).
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean env var: 1/true/yes/on (any case) → True, else default."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -22,6 +31,7 @@ class Settings:
     max_commits: int = DEFAULT_MAX_COMMITS
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
+    all_refs: bool = DEFAULT_ALL_REFS
 
 
 def parse_args(argv: list[str] | None = None) -> Settings:
@@ -43,10 +53,18 @@ def parse_args(argv: list[str] | None = None) -> Settings:
     )
     parser.add_argument("--host", default=os.environ.get("HOST", DEFAULT_HOST))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", DEFAULT_PORT)))
+    parser.add_argument(
+        "--all-refs",
+        action="store_true",
+        default=_env_bool("ALL_REFS", DEFAULT_ALL_REFS),
+        help="Walk all branches (local and remote-tracking) and tags, not just "
+        "HEAD (default: HEAD-only; env: ALL_REFS).",
+    )
     ns = parser.parse_args(argv)
     return Settings(
         repo_path=ns.repo_path,
         max_commits=max(1, ns.max_commits),
         host=ns.host,
         port=ns.port,
+        all_refs=ns.all_refs,
     )
