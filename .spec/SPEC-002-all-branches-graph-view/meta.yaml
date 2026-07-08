@@ -103,4 +103,5 @@ ready_sha: "2bebf33409817836dca5fe8735c8d7b5a89a4aa8"
 
 completion:
   date: 2026-07-08
-  pull_requests: []
+  pull_requests:
+    - "https://github.com/AchimDaeubler/team100/pull/3"
