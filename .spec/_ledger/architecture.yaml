@@ -14,3 +14,22 @@ entries:
     tags: [architecture, graph, server-side, testability]
     date: 2026-07-08
     source_spec: SPEC-001
+  - type: constraint_found
+    summary: "Greedy lane layout assumes children precede parents and colors by lane index, not by ref."
+    context: >
+      The newest-first lane algorithm (app/graph.py build_graph) implicitly
+      relies on each commit being processed before its parents. Git's default
+      order (pygit2 SortMode.TIME / `git log` with no order flag) does NOT
+      guarantee this — only equal or inverted committer timestamps (e.g. rebased
+      branches) can violate it; strictly increasing timestamps hold in the
+      common case. Guard it with a fixture whose sibling tips share a timestamp
+      and assert edges only ever reference real parents; treat a switch to
+      `SortMode.TOPOLOGICAL | SortMode.TIME` (= `--date-order`) as the fallback
+      if a real failure surfaces. Also note node color is `PALETTE[lane % len]`
+      — a function of the lane/column index, not of which ref a commit belongs
+      to, so a branch tip can share the mainline color. Per-ref coloring or
+      labels would need ref membership threaded from the reader into the graph
+      layer (ref decoration — a separate concern).
+    tags: [architecture, graph, ordering, lane-assignment, ref-decoration]
+    date: 2026-07-08
+    source_spec: SPEC-002
