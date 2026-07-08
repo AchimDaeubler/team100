@@ -80,6 +80,19 @@ learnings:
       freeing via Get-NetTCPConnection was needed.
     tags: [windows, environment, dev-workflow]
     date: 2026-07-06
+  - type: constraint_discovered
+    summary: "Setting GIT_*_DATE in the stateful shell silently backdated every later commit."
+    context: >
+      While building a demo repo for screenshots, GIT_AUTHOR_DATE/GIT_COMMITTER_DATE
+      were exported in the shared, stateful shell and never unset. Because the shell
+      session persists across tool calls, all subsequent SPEC-001 commits inherited
+      the fake date (2026-01-01) and had to be rewritten via git filter-branch and
+      force-pushed. Lesson: never leave persistent env vars (especially GIT_*_DATE)
+      set in the shared shell; scope them to the single command (test fixtures set
+      env per-subprocess, which is why they were unaffected). Promoted to
+      .cursor/rules/shell-env-hygiene.mdc.
+    tags: [shell, environment, git, process]
+    date: 2026-07-08
 ready_sha: "d881f298b573e4ec61f8ced08e74d57bb35c4d4b"
 
 completion:
