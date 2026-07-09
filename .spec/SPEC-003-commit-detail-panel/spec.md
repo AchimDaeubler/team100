@@ -2,7 +2,7 @@
 id: SPEC-003
 title: "Commit detail panel (click to inspect a commit)"
 category: feature
-owner: Max Nigsch                         # git config user.name
+owner: achim.daeubler                     # git config user.name
 authored_by: augmented                # augmented | automated
 ---
 

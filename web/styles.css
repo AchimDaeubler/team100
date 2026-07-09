@@ -4,7 +4,10 @@
   --fg: #cdd6f4;
   --muted: #9399b2;
   --row-hover: #313244;
+  --row-sel: #45475a;
   --border: #313244;
+  --accent: #89b4fa;
+  --sel-stroke: #f9e2af;
 }
 
 * {
@@ -58,14 +61,26 @@ header h1 {
 
 .row-hit {
   fill: transparent;
+  cursor: pointer;
 }
 .row-hit:hover {
   fill: var(--row-hover);
+}
+.row-hit.selected {
+  fill: var(--row-sel);
+}
+.row-hit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .node {
   stroke: var(--bg);
   stroke-width: 1.5;
+}
+.node.selected {
+  stroke: var(--sel-stroke);
+  stroke-width: 2.5;
 }
 
 .edge {
@@ -77,6 +92,9 @@ header h1 {
 .subject,
 .meta {
   font-size: 12px;
+  /* Let clicks fall through to the row-hit rect beneath (AC-1: the whole row
+     opens the panel, including when the pointer is over the text). */
+  pointer-events: none;
 }
 
 .sha {
@@ -90,4 +108,153 @@ header h1 {
 
 .meta {
   fill: var(--muted);
+}
+
+/* Commit detail drawer (native <dialog> styled as a right-side panel). */
+#detail {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: auto; /* cancel the UA dialog's left:0 so it anchors to the right */
+  bottom: 0;
+  margin: 0;
+  width: 420px;
+  max-width: 92vw;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  overflow-y: auto;
+  z-index: 3;
+}
+#detail::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+.detail-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+#detail-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+}
+#detail-close:hover {
+  background: var(--row-hover);
+}
+
+.detail-body {
+  padding: 12px 16px 24px;
+}
+.detail-section {
+  margin-top: 18px;
+}
+.detail-section h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.detail-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.detail-meta dt {
+  color: var(--muted);
+}
+.detail-meta dd {
+  margin: 0;
+  word-break: break-word;
+}
+.detail-meta .mono,
+.detail-sha {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.detail-message {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.parent-link {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.parent-inert {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--muted);
+}
+
+.detail-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+}
+.detail-files li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  align-items: baseline;
+}
+.change-kind {
+  flex: none;
+  width: 1.2em;
+  text-align: center;
+  font-weight: 700;
+  border-radius: 3px;
+}
+.change-A { color: #a6e3a1; }
+.change-M { color: #f9e2af; }
+.change-D { color: #f38ba8; }
+.change-R { color: #89dceb; }
+.change-C { color: #89dceb; }
+.change-T { color: #cba6f7; }
+.file-path {
+  word-break: break-all;
+}
+.file-old {
+  color: var(--muted);
+}
+.detail-more {
+  color: var(--muted);
+  font-style: italic;
 }

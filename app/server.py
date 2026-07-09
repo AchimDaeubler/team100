@@ -6,6 +6,7 @@ writes to the target repository.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -13,10 +14,20 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, parse_args
-from app.git_reader import RepositoryError, read_commits
+from app.git_reader import (
+    RepositoryError,
+    UnknownCommitError,
+    read_commit_detail,
+    read_commits,
+)
 from app.graph import build_graph
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+# 4–40 hex chars, any case (git rev-parse semantics); validated in-route so a
+# malformed SHA yields the project's {"error": ...} 400 envelope rather than
+# FastAPI's default 422 body (AC-7).
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{4,40}$")
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -42,6 +53,21 @@ def create_app(settings: Settings) -> FastAPI:
                 "commits": graph["commits"],
             }
         )
+
+    @app.get("/api/commits/{sha}")
+    def get_commit_detail(sha: str) -> JSONResponse:
+        if not _SHA_RE.match(sha):
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"malformed commit sha: {sha!r}"},
+            )
+        try:
+            detail = read_commit_detail(settings.repo_path, sha)
+        except UnknownCommitError as exc:
+            return JSONResponse(status_code=404, content={"error": str(exc)})
+        except RepositoryError as exc:
+            return JSONResponse(status_code=400, content={"error": str(exc)})
+        return JSONResponse(detail.to_dict())
 
     # StaticFiles(html=True) serves web/index.html at "/" and the JS/CSS assets.
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="static")
