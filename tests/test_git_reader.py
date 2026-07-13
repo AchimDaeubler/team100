@@ -300,6 +300,58 @@ def test_detail_unknown_sha_raises_unknown(content_repo: Path, detail_reader):
         detail_reader(str(content_repo), "0" * 40)
 
 
+def _shortest_ambiguous_prefix(repo: Path) -> str:
+    """Shortest hex prefix shared by >=2 objects in ``repo`` (guaranteed
+    ambiguous). With more than 16 objects a 1-char collision is certain."""
+    out = subprocess.run(
+        ["git", "-C", str(repo), "rev-list", "--objects", "--all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    oids = [line.split()[0] for line in out.splitlines() if line]
+    for length in range(1, 40):
+        seen: set[str] = set()
+        for h in oids:
+            prefix = h[:length]
+            if prefix in seen:
+                return prefix
+            seen.add(prefix)
+    raise AssertionError("no ambiguous prefix found in repo")
+
+
+def test_detail_ambiguous_prefix_raises_repository_error(content_repo: Path):
+    # AC-7 (pygit2 path): a prefix matching multiple objects -> RepositoryError
+    # (HTTP 400), NOT UnknownCommitError (404). pygit2 raises ValueError on
+    # GIT_EAMBIGUOUS, which read_commit_detail maps to RepositoryError.
+    prefix = _shortest_ambiguous_prefix(content_repo)
+    with pytest.raises(RepositoryError) as excinfo:
+        read_commit_detail(str(content_repo), prefix)
+    assert not isinstance(excinfo.value, UnknownCommitError)
+
+
+def test_classify_commit_error_ambiguous_is_repository_error():
+    # CLI-fallback counterpart: git's "short object ID ... is ambiguous" (which
+    # also carries an "ambiguous argument ... unknown revision" line) must map
+    # to RepositoryError (400), not UnknownCommitError (404).
+    stderr = (
+        "error: short object ID abcd is ambiguous\n"
+        "fatal: ambiguous argument 'abcd': unknown revision or path not in "
+        "the working tree"
+    )
+    err = git_reader._classify_commit_error("/repo", stderr)
+    assert isinstance(err, RepositoryError)
+    assert not isinstance(err, UnknownCommitError)
+
+
+def test_classify_commit_error_missing_is_unknown_commit():
+    # A well-formed but missing object -> UnknownCommitError (404).
+    err = git_reader._classify_commit_error(
+        "/repo", "fatal: bad object 0000000000000000000000000000000000000000"
+    )
+    assert isinstance(err, UnknownCommitError)
+
+
 def _snapshot_git(repo: Path) -> dict[str, str]:
     gitdir = repo / ".git"
     snap: dict[str, str] = {}

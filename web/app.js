@@ -265,6 +265,11 @@ function openDetail(sha) {
         return;
       }
       populateDetail(body);
+      // showModal() gives us AC-10's modal focus trap for free, at the cost of
+      // making the underlying graph inert while open (a tradeoff vs AC-9's
+      // literal "SVG stays scrollable"). AC-9's core intent still holds: the
+      // graph does not reflow and the selected row stays highlighted, and the
+      // drawer overlays rather than resizing the SVG.
       if (!dialog.open) dialog.showModal();
     })
     .catch((err) => showError(String(err)));

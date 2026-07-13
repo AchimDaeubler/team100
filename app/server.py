@@ -6,6 +6,7 @@ writes to the target repository.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -22,12 +23,15 @@ from app.git_reader import (
 )
 from app.graph import build_graph
 
+logger = logging.getLogger(__name__)
+
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 # 4–40 hex chars, any case (git rev-parse semantics); validated in-route so a
 # malformed SHA yields the project's {"error": ...} 400 envelope rather than
-# FastAPI's default 422 body (AC-7).
-_SHA_RE = re.compile(r"^[0-9a-fA-F]{4,40}$")
+# FastAPI's default 422 body (AC-7). Matched with re.fullmatch so a trailing
+# newline (which "$" would otherwise permit) is rejected.
+_SHA_RE = re.compile(r"[0-9a-fA-F]{4,40}")
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -56,17 +60,27 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/api/commits/{sha}")
     def get_commit_detail(sha: str) -> JSONResponse:
-        if not _SHA_RE.match(sha):
+        if not _SHA_RE.fullmatch(sha):
             return JSONResponse(
                 status_code=400,
-                content={"error": f"malformed commit sha: {sha!r}"},
+                content={"error": "malformed commit sha"},
             )
+        # Domain-error messages can embed the server's repo path or raw git
+        # stderr, so log the detail server-side and return a generic client
+        # message rather than echoing internals into the response body.
         try:
             detail = read_commit_detail(settings.repo_path, sha)
         except UnknownCommitError as exc:
-            return JSONResponse(status_code=404, content={"error": str(exc)})
+            logger.info("commit detail not found for %r: %s", sha, exc)
+            return JSONResponse(
+                status_code=404, content={"error": "commit not found"}
+            )
         except RepositoryError as exc:
-            return JSONResponse(status_code=400, content={"error": str(exc)})
+            logger.warning("commit detail read failed for %r: %s", sha, exc)
+            return JSONResponse(
+                status_code=400,
+                content={"error": "could not read the requested commit"},
+            )
         return JSONResponse(detail.to_dict())
 
     # StaticFiles(html=True) serves web/index.html at "/" and the JS/CSS assets.

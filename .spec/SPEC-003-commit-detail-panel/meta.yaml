@@ -88,4 +88,5 @@ ready_sha: "8a1473fcac4081b2624172643eba9176c057d56b"
 
 completion:
   date: 2026-07-09
-  pull_requests: []
+  pull_requests:
+    - "https://github.com/AchimDaeubler/team100/pull/4"

@@ -365,7 +365,13 @@ def _classify_commit_error(repo_path: str, stderr: str) -> RepositoryError:
     :class:`UnknownCommitError` (HTTP 404).
     """
     low = stderr.lower()
-    if "ambiguous" in low and "unknown revision" not in low:
+    # A prefix that matches multiple objects yields git's specific
+    # "short object ID <x> is ambiguous" (older git: "short SHA1 <x> is
+    # ambiguous") line — match the "is ambiguous" phrase, not the bare word
+    # "ambiguous". A *missing* revision also prints "ambiguous argument '<x>':
+    # unknown revision ...", so keying on "ambiguous" alone would misclassify
+    # an unknown SHA as ambiguous (400) instead of not-found (404).
+    if "is ambiguous" in low:
         return RepositoryError(
             f"Ambiguous commit prefix (matches multiple objects): {stderr}"
         )
