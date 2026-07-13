@@ -13,6 +13,25 @@
     </header>
     <div id="error" class="error" hidden></div>
     <main id="graph" class="graph"></main>
+
+    <dialog id="detail" aria-labelledby="detail-title">
+      <div class="detail-head">
+        <h2 id="detail-title">Commit</h2>
+        <button id="detail-close" type="button" aria-label="Close commit detail">&times;</button>
+      </div>
+      <div class="detail-body">
+        <dl id="detail-meta" class="detail-meta"></dl>
+        <section class="detail-section">
+          <h3>Message</h3>
+          <pre id="detail-message" class="detail-message"></pre>
+        </section>
+        <section class="detail-section">
+          <h3 id="detail-files-title">Files changed</h3>
+          <ul id="detail-files" class="detail-files"></ul>
+        </section>
+      </div>
+    </dialog>
+
     <script src="/app.js"></script>
   </body>
 </html>

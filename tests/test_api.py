@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.git_reader import read_commits
 from app.server import create_app
 
 
@@ -95,3 +96,100 @@ def test_all_refs_includes_remote_tracking_commits(remote_tracking_repo: Path):
     assert all_body["count"] > head_body["count"]
     subjects = {c["subject"] for c in all_body["commits"]}
     assert "Remote: only-b" in subjects
+
+
+# --- Commit detail endpoint (SPEC-003) -----------------------------------
+
+_DETAIL_FIELDS = (
+    "sha",
+    "short_sha",
+    "parents",
+    "subject",
+    "message",
+    "author_name",
+    "author_email",
+    "authored_timestamp",
+    "committer_name",
+    "committer_email",
+    "committer_timestamp",
+    "files",
+    "files_truncated",
+    "total_files",
+)
+
+
+def _sha_by_subject(repo: Path, subject: str) -> str:
+    for c in read_commits(str(repo)):
+        if c.subject == subject:
+            return c.sha
+    raise AssertionError(f"no commit with subject {subject!r}")
+
+
+def test_detail_endpoint_full_field_set(content_repo: Path):
+    sha = _sha_by_subject(content_repo, "modify a")
+    resp = _client(content_repo).get(f"/api/commits/{sha}")
+    assert resp.status_code == 200  # AC-6
+    body = resp.json()
+    for field in _DETAIL_FIELDS:
+        assert field in body, field
+    assert body["sha"] == sha
+    assert body["files"] == [{"path": "a.txt", "change_kind": "M"}]
+    # old_path is omitted for non-rename entries (AC-6).
+    assert "old_path" not in body["files"][0]
+
+
+def test_detail_rename_includes_old_path(content_repo: Path):
+    sha = _sha_by_subject(content_repo, "rename c")
+    body = _client(content_repo).get(f"/api/commits/{sha}").json()
+    rename = next(f for f in body["files"] if f["change_kind"] == "R")
+    assert rename["old_path"] == "dir/c.txt"
+    assert rename["path"] == "dir/c_renamed.txt"
+
+
+def test_detail_merge_reports_first_parent(content_repo: Path):
+    sha = _sha_by_subject(content_repo, "Merge feature")
+    body = _client(content_repo).get(f"/api/commits/{sha}").json()
+    # AC-5: the UI's "vs <short-sha>" label is derived from parents[0].
+    assert len(body["parents"]) == 2
+    assert body["files"] == [{"path": "a.txt", "change_kind": "M"}]
+
+
+def test_detail_short_sha_prefix_resolves(content_repo: Path):
+    full = _sha_by_subject(content_repo, "delete b")
+    body = _client(content_repo).get(f"/api/commits/{full[:7]}").json()
+    assert body["sha"] == full  # AC-7: short prefix resolves
+
+
+def test_detail_mixed_case_sha(content_repo: Path):
+    full = _sha_by_subject(content_repo, "delete b")
+    mixed = full[:10].upper()
+    body = _client(content_repo).get(f"/api/commits/{mixed}").json()
+    assert body["sha"] == full  # AC-7: any-case input normalized
+
+
+def test_detail_unknown_sha_returns_404(content_repo: Path):
+    resp = _client(content_repo).get("/api/commits/" + "0" * 40)
+    assert resp.status_code == 404  # AC-7
+    assert "error" in resp.json()
+
+
+def test_detail_malformed_sha_returns_400(content_repo: Path):
+    resp = _client(content_repo).get("/api/commits/zzzz")
+    assert resp.status_code == 400  # AC-7: envelope is {"error": ...}, not 422
+    assert "error" in resp.json()
+
+
+def test_list_endpoint_shape_unchanged(branched_repo: Path):
+    # Regression guard: SPEC-001's /api/commits response shape is intact.
+    body = _client(branched_repo).get("/api/commits").json()
+    assert set(body.keys()) == {
+        "repo",
+        "max_commits",
+        "count",
+        "lane_count",
+        "commits",
+        "refs",  # added by SPEC-002 (all-refs mode); still additive
+    }
+    commit = body["commits"][0]
+    for field in ("sha", "short_sha", "parents", "subject", "lane", "color", "edges"):
+        assert field in commit

@@ -18,6 +18,8 @@ It never writes to the target repository.
   and tag (not just `HEAD`), so unmerged branches, remote branches, and side
   histories are visible.
 - Server-side commit cap (default 500) so it stays responsive on large repos.
+- **Click a commit to open a detail panel** with the full message, author &
+  committer identities/timestamps, parent SHAs, and the list of files changed.
 - Clear error message when pointed at a path that is not a git repository.
 
 ## Requirements
@@ -140,6 +142,72 @@ is unchanged unless you opt in.
 Pointing at a path that is not a git repository returns `400` with
 `{ "error": "…" }` instead of crashing.
 
+### `GET /api/commits/{sha}`
+
+Returns full detail for a single commit. `{sha}` may be a full 40-hex SHA or a
+short prefix of at least 4 hex characters; input case is accepted in any mix
+and normalized to lowercase before lookup (matching `git rev-parse`).
+
+```jsonc
+{
+  "sha": "…40 hex…",
+  "short_sha": "21b5ce8",
+  "parents": ["…", "…"],          // full SHAs; ≥2 entries for a merge commit
+  "subject": "Merge feature into main",
+  "message": "Merge feature into main\n\nFull body, line breaks preserved.",
+  "author_name": "Demo User",
+  "author_email": "demo@example.com",
+  "authored_timestamp": 1767272400,
+  "committer_name": "Demo User",
+  "committer_email": "demo@example.com",
+  "committer_timestamp": 1767272400,
+  "files": [
+    { "path": "src/app.py", "change_kind": "M" },
+    { "path": "docs/new.md", "change_kind": "A" },
+    { "path": "lib/new.py", "change_kind": "R", "old_path": "lib/old.py" }
+  ],
+  "files_truncated": false,
+  "total_files": 3
+}
+```
+
+- `change_kind` is a single letter: `A` added, `M` modified, `D` deleted,
+  `R` renamed, `C` copied (`T`/others may also appear, e.g. submodule changes).
+  `old_path` is present only for renames/copies.
+- **File-list cap:** the `files` array is capped at **200** entries. When a
+  commit changes more files, `files_truncated` is `true` and `total_files`
+  reports the real count; the UI shows a trailing "… and N more" line.
+- **Initial commit** (no parents): every path is diffed against the empty tree
+  and appears as `A`.
+- **Merge commit** (2+ parents): the file list is the diff against the **first
+  parent** (the "what did this merge bring in" convention used by
+  GitHub/GitLab, not `git show`'s combined-diff default); the UI labels it
+  `vs <short-sha of first parent>`.
+
+Status codes:
+
+| Status | When | Body |
+|--------|------|------|
+| `200` | Commit found | detail object above |
+| `400` | Malformed SHA (not 4–40 hex), ambiguous short prefix, or unreadable repo | `{ "error": "…" }` |
+| `404` | Well-formed SHA that does not exist in the repository | `{ "error": "…" }` |
+
+Fetching commit detail is strictly read-only — no refs, objects, working tree,
+or index are modified.
+
+## Commit detail panel
+
+Click any commit node or its row to open a detail panel (a modal dialog docked
+to the right). It shows the full SHA, the complete commit message, author and
+committer identities and timestamps, the parent short-SHAs (clickable when the
+parent is in the current graph window), and the list of changed files (capped
+at 200, with a "… and N more" indicator beyond that).
+
+Keyboard: `Tab` moves between commit rows; `Enter`/`Space` opens the panel and
+moves focus into it; `Esc` (or the Close button, or clicking outside) closes it
+and returns focus to the row you opened. Opening the panel does not reflow the
+graph.
+
 ## Development
 
 Run the test suite (builds small golden fixture repositories and checks the
@@ -168,7 +236,9 @@ tests/            # pytest suite + golden fixture repositories
 ## Scope
 
 This slice reads commits (from `HEAD` or, with `--all-refs`, from all branches
-— local and remote-tracking — and tags) and renders them. Out of scope for now:
-commit detail/diff view, branch/tag/HEAD ref decoration (drawing ref name labels
-on nodes), an in-UI repo picker or per-branch toggles, search/filtering, and
-pagination beyond the fixed cap.
+— local and remote-tracking — and tags), renders them as a graph, and lets you
+click any commit for a detail panel (metadata + changed-file list). Rendering
+the actual diff/patch content is a separate later spec. Also out of scope for
+now: branch/tag/HEAD ref decoration (drawing ref name labels on nodes), an in-UI
+repo picker or per-branch toggles, search/filtering, and pagination beyond the
+fixed cap.

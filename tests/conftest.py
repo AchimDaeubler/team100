@@ -54,6 +54,31 @@ class RepoBuilder:
         self._git("commit", "-q", "--allow-empty", "-m", message)
         return self._git("rev-parse", "HEAD").strip()
 
+    def write(self, relpath: str, content: str) -> None:
+        p = self.path / relpath
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+
+    def commit_files(
+        self,
+        message: str,
+        add: dict[str, str] | None = None,
+        delete: list[str] | None = None,
+        rename: list[tuple[str, str]] | None = None,
+    ) -> str:
+        """Commit real file changes (adds/modifies, deletes, renames)."""
+        self._clock += 3600
+        for old, new in rename or []:
+            self._git("mv", old, new)
+        for path in delete or []:
+            self._git("rm", "-q", path)
+        if add:
+            for path, content in add.items():
+                self.write(path, content)
+            self._git("add", "--", *add.keys())
+        self._git("commit", "-q", "-m", message)
+        return self._git("rev-parse", "HEAD").strip()
+
     def checkout(self, branch: str, create: bool = False) -> None:
         if create:
             self._git("checkout", "-q", "-b", branch)
@@ -107,6 +132,52 @@ def branched_repo(tmp_path: Path) -> Path:
     b.checkout("main")
     b.commit("Main: add h")
     b.merge("feature", message="Merge feature into main")
+    return b.path
+
+
+@pytest.fixture(scope="session")
+def content_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Repo with real file content: add / modify / delete / rename + a merge.
+
+    Commit subjects (newest first) let tests locate commits without SHAs:
+      "Merge feature"      — 2-parent merge; first-parent diff modifies a.txt
+      "main: add d"        — first parent of the merge
+      "feature: change a"  — modifies a.txt on the feature branch
+      "rename c"           — renames dir/c.txt -> dir/c_renamed.txt (R)
+      "delete b"           — deletes b.txt (D)
+      "modify a"           — modifies a.txt (M) + multi-line body
+      "root: add files"    — initial commit, adds a.txt/b.txt/dir/c.txt (all A)
+
+    Session-scoped: read-only across tests, and rebuilding per test is slow on
+    platforms with high git-subprocess startup cost.
+    """
+    b = RepoBuilder(tmp_path_factory.mktemp("content") / "repo")
+    b.commit_files(
+        "root: add files",
+        add={"a.txt": "a1\n", "b.txt": "b1\n", "dir/c.txt": "c1\n"},
+    )
+    b.commit_files(
+        "modify a\n\nBody line one.\nBody line two.",
+        add={"a.txt": "a2\n"},
+    )
+    b.commit_files("delete b", delete=["b.txt"])
+    b.commit_files("rename c", rename=[("dir/c.txt", "dir/c_renamed.txt")])
+    b.checkout("feature", create=True)
+    b.commit_files("feature: change a", add={"a.txt": "a3 from feature\n"})
+    b.checkout("main")
+    b.commit_files("main: add d", add={"d.txt": "d1\n"})
+    b.merge("feature", message="Merge feature")
+    return b.path
+
+
+@pytest.fixture(scope="session")
+def many_files_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Initial commit that adds 250 files (exceeds the 200-file cap)."""
+    b = RepoBuilder(tmp_path_factory.mktemp("many") / "repo")
+    b.commit_files(
+        "add many files",
+        add={f"f{i:04d}.txt": f"{i}\n" for i in range(250)},
+    )
     return b.path
 
 
