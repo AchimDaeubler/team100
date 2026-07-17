@@ -35,3 +35,62 @@ entries:
     tags: [git-reader, all-refs, pygit2, remotes, git-log]
     date: 2026-07-08
     source_spec: SPEC-002
+  - type: gotcha_hit
+    summary: "`for-each-ref` uses %00 for NUL, NOT the %x00 escape from `git log`/`show` pretty-format."
+    context: >
+      The two families of git format strings use different NUL escapes:
+      `git log --pretty=format:...` and `git show --pretty=format:...` accept
+      `%x00`, while `git for-each-ref --format=...` accepts only `%00` (its
+      documented literal). Using `%x00` in a for-each-ref format is not an
+      error — git prints the four literal characters `%x00` — but a downstream
+      NUL-splitting parser then produces empty output. Concrete fix pattern:
+      when adding a new `for-each-ref` reader, use `"%00".join([...])`, verify
+      once with `repr(proc.stdout)` on a sample repo, and leave a comment
+      calling out the escape difference so the SPEC-004 typo does not get
+      re-introduced from muscle memory.
+    tags: [git-reader, git-cli, escapes, for-each-ref, gotcha]
+    date: 2026-07-17
+    source_spec: SPEC-004
+  - type: constraint_found
+    summary: "Never embed literal NUL bytes in argv on Windows — use git's `%x00`/`%00` escape and split the output."
+    context: >
+      Windows `CreateProcess` rejects any argv string containing an embedded
+      NUL and raises `ValueError: embedded null character`. This can hide
+      behind pygit2 for a long time — SPEC-001's `_read_git_log` did
+      `_FIELD_SEP.join(...)` with `_FIELD_SEP = "\x00"` and shipped that way
+      because tests always went through the pygit2 primary path; SPEC-004's
+      dual-backend parity fixture (parametrized `[pygit2, cli]` via patching
+      `_read_pygit2`) was the first test to force the CLI fallback and it
+      surfaced immediately. Pattern: build git format strings from the
+      *escape* (`%x00` for `git log`/`show`, `%00` for `for-each-ref`) and
+      only split on the real NUL byte in the returned stdout. Pair every
+      subprocess reader with a test that forces its path (monkeypatch the
+      pygit2 counterpart) so a "primary + fallback" duo is not tested in name
+      only — this catches Windows-argv problems and unborn-HEAD divergence
+      before real users hit them.
+    tags: [git-reader, git-cli, windows, subprocess, argv, dual-backend]
+    date: 2026-07-17
+    source_spec: SPEC-004
+  - type: pattern_discovered
+    summary: "Ref decoration lives in a separate tip→refs map, computed regardless of walk mode."
+    context: >
+      `git log --decorate` semantics — refs label only the commit they point
+      directly at, not every reachable ancestor — map cleanly to a
+      `dict[full_sha, list[{name, type, is_head}]]` built via one pass over
+      `repo.references` (pygit2) or one `git for-each-ref` (CLI). Skip
+      `refs/remotes/*/HEAD` symbolic aliases (they duplicate the pointed-at
+      branch under a different name — filter by `ReferenceType.SYMBOLIC` or
+      by `refname.endswith('/HEAD')`). Annotated tags peel with
+      `Reference.peel(pygit2.Commit)` / `%(*objectname)` when
+      `%(*objecttype)==commit`. HEAD: attached → mark the matching local
+      branch entry `is_head:true` (so the UI can render `HEAD → main`);
+      detached → dedicated `{name:"HEAD", type:"head", is_head:true}` entry
+      on the pointed-at commit. Enumerate refs even in HEAD-only walk mode;
+      just intersect against the returned window (refs whose tip is not in
+      the fetched window silently do not appear — no dangling entries, same
+      convention as SPEC-001 boundary edges). Both backends must produce
+      set-equal maps; test with a `git for-each-ref` oracle rather than
+      asserting badge ordering (git has no universal type-sort).
+    tags: [git-reader, ref-decoration, all-refs, dual-backend, tip-only]
+    date: 2026-07-17
+    source_spec: SPEC-004

@@ -33,3 +33,23 @@ entries:
     tags: [architecture, graph, ordering, lane-assignment, ref-decoration]
     date: 2026-07-08
     source_spec: SPEC-002
+  - type: pattern_discovered
+    summary: "Attach the SVG root to the DOM BEFORE rendering rows when any child needs `getComputedTextLength()`."
+    context: >
+      SVG `<text>` elements return 0 from `getComputedTextLength()` while they
+      are not in the layout tree. SPEC-001's `render()` appended the SVG to
+      the container at the *end* of the row loop, so any downstream code
+      relying on real measurements (SPEC-004's variable-width ref badges,
+      subject truncation to fit against the meta column) got fallback sizes
+      and rendered on top of neighbouring text. Fix: `graph.appendChild(svg)`
+      right after `el("svg", ...)` and before painting rows; per-row
+      measurements are then real from the first `getComputedTextLength()`
+      call. This unlocks two adjacent patterns cheaply: (1) two-pass render
+      where pass 1 builds width-dependent content (badges, avatars, chips)
+      and records the widest extent, and pass 2 lays out downstream columns
+      relative to that extent, and (2) per-row text truncation with
+      `<title>`-tooltip fallback so a truncated cell still reveals its
+      untruncated content on hover.
+    tags: [architecture, frontend, svg, rendering-order, measurement]
+    date: 2026-07-17
+    source_spec: SPEC-004
