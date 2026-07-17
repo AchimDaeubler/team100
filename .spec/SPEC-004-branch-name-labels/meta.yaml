@@ -1,0 +1,140 @@
+schema_version: "2026.04"
+status: done
+created: 2026-07-17
+updated: 2026-07-17
+
+# Origin (optional — informational, not a dependency)
+# source: "https://..."                 # Shareable origin breadcrumb, never a local filesystem path like /home/... or /Users/...
+# tracking_id: ""                       # External reference (Notion task, Jira ticket, etc.)
+
+# Dependencies (optional — advisory ordering, not execution blockers)
+# depends_on:
+#   - "SPEC-030"                        # Lightweight sequencing; upstream should usually be done first
+# blocked_by:
+#   - spec: "SPEC-030"
+#     until_status: "ready"            # required; ready | done
+
+# Coordination (blast radius classification for parallel work)
+coordination:
+  blast_radius: isolated               # structural | isolated | mixed
+  parallel_safe: true                  # true only when blast_radius is isolated; do not set independently
+
+# Branching (optional — non-default branch topology for stacked or integration workflows)
+# branching:
+#   base_branch: ""                    # Branch to fork from; defaults to repo default branch when absent
+#   target_branch: ""                  # PR base branch; defaults to repo default branch when absent
+
+# Freshness snapshot (populate when status reaches ready)
+# ready_sha: ""                         # Full git HEAD commit recorded at the ready transition; used for advisory staleness checks
+
+# Completion (populate when status reaches done)
+# completion:
+#   date: 2026-07-17
+#   acceptance_criteria_waived:         # Omit if none waived
+#     - acceptance_criteria: ""
+#       rationale: ""
+#   self_review_waived:                 # Omit if none waived; pr-review blocking findings the user accepted to proceed
+#     - finding: ""
+#       rationale: ""
+#   pull_requests:
+#     - "https://github.com/..."
+
+# Learnings (add during and after execution)
+# learnings:
+#   - type: pattern_discovered          # See references/spec-format.md for all types
+#     summary: ""
+#     context: ""
+#     tags: []
+#     date: 2026-07-17
+
+depends_on:
+  - "SPEC-001"
+  - "SPEC-002"
+ready_sha: "cc3cade1e37e145472b508cd167a817c9e195e34"
+
+completion:
+  date: 2026-07-17
+  pull_requests:
+    - "https://github.com/AchimDaeubler/team100/pull/5"
+
+learnings:
+  - type: gotcha_hit
+    summary: "for-each-ref uses %00 for NUL, not %x00 like git log/show pretty-format"
+    context: |
+      The spec's research note said "Use git's %x00/%00 NUL escape" for the
+      for-each-ref format. Only %00 actually works: for-each-ref does not
+      support %x00 (that's a git log/show pretty-format-specific escape). The
+      first CLI implementation using %x00 emitted literal '%x00' characters
+      in stdout and the split-on-NUL parser produced empty decoration maps.
+      Fix was a one-char change to %00. Left a comment in _decoration_git so
+      the difference isn't re-introduced.
+    tags: [git, cli, escapes, dual-backend]
+    date: 2026-07-17
+  - type: latent_bug_uncovered
+    summary: "_read_git_log was passing literal NUL bytes in argv, unreachable on Windows"
+    context: |
+      SPEC-001's `_read_git_log` built its format string with `_FIELD_SEP.join(...)`
+      where `_FIELD_SEP = "\x00"`, so a real NUL byte lived in argv. Windows
+      `CreateProcess` rejects that with "embedded null character". The bug
+      was latent because the test suite always went through the pygit2 path
+      (pygit2 was always installed), so the CLI fallback was never exercised
+      on Windows. SPEC-004's parametrized `decoration_backend` fixture is
+      the first test that forces the CLI fallback and immediately surfaced
+      the bug. Fixed by switching to git's literal `%x00` escape (mirroring
+      SPEC-003's `_read_commit_detail_git` precedent) plus adding an env-scoped
+      `GIT_OPTIONAL_LOCKS=0` for read-only hygiene.
+    tags: [windows, subprocess, dual-backend, latent-bug, spec-001, spec-003]
+    date: 2026-07-17
+  - type: pattern_discovered
+    summary: "SVG width measurement requires DOM attachment before render"
+    context: |
+      `text.getComputedTextLength()` returns 0 for text nodes not yet in the
+      layout tree. SPEC-001's `render()` attached the SVG at the END of
+      row-rendering. That made SPEC-004's variable-width ref badges collapse
+      to their fallback size (16px) and the subject text overlapped the
+      badges visually. Fix: attach the SVG to the DOM BEFORE painting rows
+      so all subsequent `getComputedTextLength()` calls return real widths.
+      This unlocked pill-badge sizing, subject-truncation, and dynamic
+      column widths in a single change.
+    tags: [frontend, svg, measurement, rendering-order]
+    date: 2026-07-17
+  - type: scope_deviation
+    summary: "Fixed the pre-existing Windows argv-NUL bug in _read_git_log incidentally"
+    context: |
+      The user was asked whether SPEC-004 should also fix the latent
+      `_read_git_log` bug uncovered by the new dual-backend tests. Chose to
+      fix it in-scope because (a) it's a one-line change following SPEC-003's
+      exact precedent (`%x00` + `env=` for GIT_OPTIONAL_LOCKS), (b) the fix
+      is required to prove SPEC-004's dual-backend parity end-to-end (AC-2
+      set-equality vs `git for-each-ref` on the CLI backend), and (c) the
+      bug would have made the CLI fallback broken on any Windows user
+      without pygit2 available. The change touched only `app/git_reader.py`.
+    tags: [scope, bug-fix, dual-backend, spec-001-carryover]
+    date: 2026-07-17
+  - type: design_decision
+    summary: "Badges anchored to lane nodes, not to a shared sha column"
+    context: |
+      Initial rendering placed badges between sha and subject (git log
+      --decorate style / GitLab pill-tags-right-of-sha style). User feedback
+      preferred the labels-in-graph style (gitk / classic GitLens) with
+      badges anchored per-lane immediately after each commit's node. The
+      final render uses a two-pass approach: pass 1 renders row hit-areas,
+      nodes, and badges (measured); pass 2 computes shaX = max(textX,
+      maxBadgeRight + gap) and paints sha/subject/meta in a single shifted
+      column so alignment stays clean.
+    tags: [frontend, ux, badge-layout]
+    date: 2026-07-17
+  - type: design_decision
+    summary: "Subject truncation with ellipsis + tooltip, right-anchored meta column"
+    context: |
+      With badges anchored per-lane the subject column can vary widely
+      depending on branch-name lengths. Long commit subjects on any repo
+      (invoicing-tpimp average ~80 chars, some 200+) would overlap the
+      right-anchored meta column (author · date). Fix: measure each row's
+      meta width, take the max as the reserved right column, and
+      character-trim the subject with a trailing "…" when it exceeds the
+      shared subjectMaxWidth. Full subject preserved in an SVG `<title>` so
+      hover reveals the untruncated text. Same pattern as the ref-badge
+      tooltip.
+    tags: [frontend, ux, truncation, accessibility]
+    date: 2026-07-17

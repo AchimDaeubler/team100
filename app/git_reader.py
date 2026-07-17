@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 
 
 class RepositoryError(Exception):
@@ -47,6 +47,14 @@ class CommitRecord:
     author_name: str
     author_email: str
     authored_timestamp: int  # Unix epoch seconds, author time.
+    # SPEC-004: ref decoration. Each entry is {"name": str, "type": one of
+    # "branch"|"remote"|"tag"|"head", "is_head": bool}. Empty for commits that
+    # no ref points at directly (tip-only semantics, matching `git log
+    # --decorate`). Populated by ``read_commits`` from a repo-wide tip→refs
+    # map — decoration is orthogonal to the walk mode, so refs are attached
+    # even in HEAD-only mode; refs whose tip commit falls outside the
+    # returned window simply do not appear on any record.
+    refs: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,15 +83,42 @@ def read_commits(
     if max_commits < 1:
         max_commits = 1
     try:
-        return _read_pygit2(repo_path, max_commits, all_refs)
+        records = _read_pygit2(repo_path, max_commits, all_refs)
+        decoration = _decoration_pygit2(repo_path)
     except RepositoryError:
         raise
     except Exception as exc:  # pygit2 unavailable/failed → try git CLI fallback.
         if shutil.which("git"):
-            return _read_git_log(repo_path, max_commits, all_refs)
-        raise RepositoryError(
-            f"Could not read git repository at {repo_path!r}: {exc}"
-        ) from exc
+            records = _read_git_log(repo_path, max_commits, all_refs)
+            decoration = _decoration_git(repo_path)
+        else:
+            raise RepositoryError(
+                f"Could not read git repository at {repo_path!r}: {exc}"
+            ) from exc
+    return _attach_refs(records, decoration)
+
+
+def _attach_refs(
+    records: list[CommitRecord], decoration: dict[str, list[dict]]
+) -> list[CommitRecord]:
+    """Return copies of ``records`` with each ``refs`` populated from the map.
+
+    ``decoration`` maps full-SHA to a list of ref entries. Commits absent from
+    the map (i.e. no ref points at them directly) keep an empty ``refs`` list,
+    which is the AC-1 shape. This is where the boundary rule from AC-7 is
+    enforced: refs whose tip commit is not in ``records`` simply do not
+    surface — we only assign entries to records we return.
+    """
+    if not decoration:
+        return records
+    attached: list[CommitRecord] = []
+    for rec in records:
+        refs = decoration.get(rec.sha)
+        if refs:
+            attached.append(replace(rec, refs=list(refs)))
+        else:
+            attached.append(rec)
+    return attached
 
 
 def _read_pygit2(
@@ -162,6 +197,229 @@ def _tip_oids(repo, pygit2, all_refs: bool) -> list:
         add(commit.id)
 
     return tips
+
+
+_REF_TYPE_BY_PREFIX = (
+    ("refs/heads/", "branch"),
+    ("refs/remotes/", "remote"),
+    ("refs/tags/", "tag"),
+)
+
+
+def _decoration_pygit2(repo_path: str) -> dict[str, list[dict]]:
+    """Build a full-SHA → list[ref-entry] map via the pygit2 backend.
+
+    Enumerates local branches, remote-tracking branches, and tags. Each ref is
+    peeled to its ultimate commit — annotated tags via
+    ``Reference.peel(pygit2.Commit)`` handle tag-of-tag recursively; refs that
+    peel to a tree/blob or dangle are silently skipped (the ``_tip_oids``
+    peel/skip idiom). ``refs/remotes/*/HEAD`` symbolic aliases are excluded
+    because they name a branch, not a commit tip. HEAD is resolved separately:
+    attached HEAD marks the matching local-branch entry ``is_head=True`` so
+    the UI can render ``HEAD → main``; detached HEAD gets a dedicated
+    ``{name:"HEAD", type:"head", is_head:True}`` entry on the pointed-at
+    commit (AC-4).
+    """
+    import pygit2
+
+    discovered = pygit2.discover_repository(repo_path)
+    if discovered is None:
+        raise RepositoryError(
+            f"{repo_path!r} is not a git repository (or does not exist)."
+        )
+    repo = pygit2.Repository(discovered)
+    if repo.head_is_unborn or repo.is_empty:
+        return {}
+
+    symbolic_type = getattr(pygit2.enums, "ReferenceType", None)
+    symbolic_value = getattr(symbolic_type, "SYMBOLIC", None) if symbolic_type else None
+
+    decoration: dict[str, list[dict]] = {}
+
+    for name in repo.references:
+        ref_type: str | None = None
+        for prefix, kind in _REF_TYPE_BY_PREFIX:
+            if name.startswith(prefix):
+                ref_type = kind
+                break
+        if ref_type is None:
+            continue
+        ref = repo.references[name]
+        # Skip refs/remotes/<remote>/HEAD-style symbolic aliases: they name a
+        # branch by another name, not a distinct tip. Guard by type when the
+        # enum is available, and belt-and-braces on the name suffix.
+        if symbolic_value is not None and ref.type == symbolic_value:
+            continue
+        if name.endswith("/HEAD") and ref_type == "remote":
+            continue
+        try:
+            commit = ref.peel(pygit2.Commit)
+        except Exception:
+            # Tag-of-tree/blob, dangling ref, or otherwise non-commit target.
+            continue
+        entry = {"name": ref.shorthand, "type": ref_type, "is_head": False}
+        decoration.setdefault(str(commit.id), []).append(entry)
+
+    # HEAD: attached → mark the matching local-branch entry; detached → add a
+    # dedicated head entry on the pointed-at commit.
+    if repo.head_is_detached:
+        try:
+            head_commit_id = str(repo.head.peel(pygit2.Commit).id)
+            decoration.setdefault(head_commit_id, []).append(
+                {"name": "HEAD", "type": "head", "is_head": True}
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            branch_name = repo.head.shorthand
+            head_commit_id = str(repo.head.peel(pygit2.Commit).id)
+            for entry in decoration.get(head_commit_id, []):
+                if entry["type"] == "branch" and entry["name"] == branch_name:
+                    entry["is_head"] = True
+                    break
+        except Exception:
+            pass
+
+    return decoration
+
+
+def _decoration_git(repo_path: str) -> dict[str, list[dict]]:
+    """Build a full-SHA → list[ref-entry] map via one ``git for-each-ref`` pass.
+
+    Format string emits five NUL-separated fields per ref: object name, short
+    ref name, peeled-object name (annotated tag → target commit), object type,
+    peeled object type. When ``*objecttype == commit`` we take ``*objectname``
+    (annotated tag peeled to a commit); otherwise if ``objecttype == commit``
+    we take ``objectname`` (branch, remote-tracking, or lightweight tag on a
+    commit). Anything else (tag of tree/blob) is skipped, mirroring the
+    pygit2 peel/skip idiom. ``refs/remotes/*/HEAD`` symbolic aliases are
+    filtered by name. HEAD is resolved by ``git symbolic-ref -q --short HEAD``
+    (attached → branch short name; non-zero exit → detached) plus
+    ``git rev-parse HEAD``.
+
+    Uses ``%00`` for the NUL escape — ``for-each-ref``'s own literal — rather
+    than a literal NUL in argv (Windows ``CreateProcess`` rejects embedded
+    NULs, SPEC-003 gotcha). Note the escape differs by git subcommand:
+    ``git log``/``show`` pretty-format uses ``%x00``; ``for-each-ref`` uses
+    ``%00``. A real footgun documented in the SPEC-004 research note.
+    ``GIT_OPTIONAL_LOCKS`` is scoped via ``env=`` per
+    ``.cursor/rules/shell-env-hygiene.mdc``.
+    """
+    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+    fmt = "%00".join(
+        ["%(objectname)", "%(refname)", "%(*objectname)", "%(objecttype)", "%(*objecttype)"]
+    )
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "-C",
+                repo_path,
+                "for-each-ref",
+                f"--format={fmt}",
+                "refs/heads",
+                "refs/remotes",
+                "refs/tags",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+        )
+    except OSError as exc:
+        raise RepositoryError(
+            f"Failed to run git at {repo_path!r}: {exc}"
+        ) from exc
+    if proc.returncode != 0:
+        # Empty / unborn repos exit 0 with no output; a non-zero exit here
+        # means the repo itself is unreadable.
+        stderr = (proc.stderr or "").strip()
+        raise RepositoryError(
+            f"{repo_path!r} is not a git repository (or does not exist): {stderr}"
+        )
+
+    decoration: dict[str, list[dict]] = {}
+    for line in proc.stdout.splitlines():
+        if not line:
+            continue
+        parts = line.split(_FIELD_SEP)
+        if len(parts) < 5:
+            continue
+        objname, refname, peeled_objname, objtype, peeled_objtype = parts[:5]
+        # Determine the ref's namespace + skip symbolic remote-HEAD aliases.
+        ref_type: str | None = None
+        for prefix, kind in _REF_TYPE_BY_PREFIX:
+            if refname.startswith(prefix):
+                ref_type = kind
+                break
+        if ref_type is None:
+            continue
+        if ref_type == "remote" and refname.endswith("/HEAD"):
+            continue
+
+        if peeled_objtype == "commit" and peeled_objname:
+            commit_sha = peeled_objname
+        elif objtype == "commit":
+            commit_sha = objname
+        else:
+            # Tag of a tree/blob, or a malformed entry — skip (peel/skip).
+            continue
+
+        short_name = _short_ref_name(refname)
+        decoration.setdefault(commit_sha, []).append(
+            {"name": short_name, "type": ref_type, "is_head": False}
+        )
+
+    # HEAD resolution — attached vs detached.
+    sym = subprocess.run(
+        ["git", "-C", repo_path, "symbolic-ref", "-q", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+    head_rev = subprocess.run(
+        ["git", "-C", repo_path, "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+    if head_rev.returncode != 0:
+        # Unborn HEAD or otherwise no commit yet — no head entry to add.
+        return decoration
+    head_sha = head_rev.stdout.strip()
+    if not head_sha:
+        return decoration
+
+    if sym.returncode == 0 and sym.stdout.strip():
+        # Attached: mark the matching branch entry as HEAD.
+        branch_name = sym.stdout.strip()
+        for entry in decoration.get(head_sha, []):
+            if entry["type"] == "branch" and entry["name"] == branch_name:
+                entry["is_head"] = True
+                break
+    else:
+        # Detached: dedicated HEAD entry on the pointed-at commit.
+        decoration.setdefault(head_sha, []).append(
+            {"name": "HEAD", "type": "head", "is_head": True}
+        )
+
+    return decoration
+
+
+def _short_ref_name(refname: str) -> str:
+    """Strip the canonical ref-namespace prefix.
+
+    ``refs/heads/main`` → ``main``, ``refs/remotes/origin/main`` →
+    ``origin/main``, ``refs/tags/v1.0`` → ``v1.0``. Mirrors pygit2's
+    ``Reference.shorthand`` so both backends produce the same names.
+    """
+    for prefix, _kind in _REF_TYPE_BY_PREFIX:
+        if refname.startswith(prefix):
+            return refname[len(prefix):]
+    return refname
 
 
 @dataclass(frozen=True)
@@ -310,10 +568,16 @@ _FIELD_SEP = "\x00"
 def _read_git_log(
     repo_path: str, max_commits: int, all_refs: bool
 ) -> list[CommitRecord]:
-    fmt = _FIELD_SEP.join(["%H", "%P", "%s", "%an", "%ae", "%at"])
-    # --branches --remotes --tags walks every branch (local + remote-tracking)
-    # and every tag; omitting them keeps the HEAD-only default.
+    # Use git's literal ``%x00`` escape for NUL in the format string rather
+    # than embedding a real NUL in argv — Windows ``CreateProcess`` rejects
+    # embedded NUL characters (mirrors ``_read_commit_detail_git`` from
+    # SPEC-003). Output is still split on ``_FIELD_SEP`` because git expands
+    # ``%x00`` to a NUL byte in stdout.
+    fmt = "%x00".join(["%H", "%P", "%s", "%an", "%ae", "%at"])
     ref_args = ["--branches", "--remotes", "--tags"] if all_refs else []
+    # Scope GIT_OPTIONAL_LOCKS to this subprocess (never the shared shell,
+    # per .cursor/rules/shell-env-hygiene.mdc) so the read cannot mutate.
+    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     try:
         proc = subprocess.run(
             [
@@ -328,6 +592,7 @@ def _read_git_log(
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env=env,
         )
     except OSError as exc:
         raise RepositoryError(f"Failed to run git at {repo_path!r}: {exc}") from exc

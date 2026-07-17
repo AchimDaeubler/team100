@@ -181,6 +181,11 @@ def test_detail_malformed_sha_returns_400(content_repo: Path):
 
 def test_list_endpoint_shape_unchanged(branched_repo: Path):
     # Regression guard: SPEC-001's /api/commits response shape is intact.
+    # Top-level keys must NOT gain a new field for SPEC-004 — the per-commit
+    # `refs` array lives one level down under commits[]. Note the naming
+    # overlap: top-level `refs` is the walk-mode string ("head"/"all"),
+    # per-commit `refs` is SPEC-004's decoration array. Same key name,
+    # different nesting.
     body = _client(branched_repo).get("/api/commits").json()
     assert set(body.keys()) == {
         "repo",
@@ -188,8 +193,46 @@ def test_list_endpoint_shape_unchanged(branched_repo: Path):
         "count",
         "lane_count",
         "commits",
-        "refs",  # added by SPEC-002 (all-refs mode); still additive
+        "refs",  # top-level: SPEC-002 walk-mode string ("head"/"all")
     }
     commit = body["commits"][0]
     for field in ("sha", "short_sha", "parents", "subject", "lane", "color", "edges"):
         assert field in commit
+
+
+# --- SPEC-004: per-commit refs decoration --------------------------------
+
+
+def test_commit_refs_field_shape(branched_repo: Path):
+    # AC-1: every commit in the response carries a `refs` array (empty for
+    # undecorated commits) whose entries are {name, type, is_head}.
+    body = _client(branched_repo, all_refs=True).get("/api/commits").json()
+    for commit in body["commits"]:
+        assert "refs" in commit, f"missing refs on {commit['sha']}"
+        assert isinstance(commit["refs"], list)
+        for entry in commit["refs"]:
+            assert set(entry.keys()) == {"name", "type", "is_head"}
+            assert isinstance(entry["name"], str) and entry["name"]
+            assert entry["type"] in {"branch", "remote", "tag", "head"}
+            assert isinstance(entry["is_head"], bool)
+
+
+def test_commit_refs_head_arrow_shape(branched_repo: Path):
+    # AC-4: attached HEAD (branched_repo defaults to `main`) shows up as the
+    # branch entry with is_head=True on the HEAD-tip commit, ready for the UI
+    # to render "HEAD → main".
+    body = _client(branched_repo).get("/api/commits").json()
+    tip = body["commits"][0]
+    tip_refs = tip["refs"]
+    head_entry = next((e for e in tip_refs if e["is_head"]), None)
+    assert head_entry is not None
+    assert head_entry == {"name": "main", "type": "branch", "is_head": True}
+
+
+def test_commit_refs_empty_for_undecorated(linear_repo: Path):
+    # AC-1: commits with no ref pointing directly at them carry an empty
+    # `refs` array in the JSON response.
+    body = _client(linear_repo).get("/api/commits").json()
+    non_tip = body["commits"][1:]
+    for commit in non_tip:
+        assert commit["refs"] == [], commit

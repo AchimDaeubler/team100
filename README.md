@@ -13,6 +13,9 @@ It never writes to the target repository.
   (no `git` binary required), with a `git log` subprocess fallback.
 - Renders a commit graph in the browser as SVG: nodes, branch/merge edges, and
   parallel development in separate colored lanes.
+- **Ref decoration:** each commit that a ref points directly at shows a labeled
+  badge — local branches, remote-tracking branches, tags, and a `HEAD → …`
+  indicator — right next to its node, matching `git log --decorate` semantics.
 - Newest-first ordering matching the default `git log`.
 - Optional **all-refs mode** to walk every branch (local and remote-tracking)
   and tag (not just `HEAD`), so unmerged branches, remote branches, and side
@@ -133,6 +136,11 @@ is unchanged unless you opt in.
       "color": "#0072B2",
       "edges": [
         { "parent": "…", "to_lane": 0, "color": "#0072B2", "boundary": false }
+      ],
+      "refs": [
+        { "name": "main",        "type": "branch", "is_head": true  },
+        { "name": "origin/main", "type": "remote", "is_head": false },
+        { "name": "v1.0",        "type": "tag",    "is_head": false }
       ]
     }
   ]
@@ -141,6 +149,30 @@ is unchanged unless you opt in.
 
 Pointing at a path that is not a git repository returns `400` with
 `{ "error": "…" }` instead of crashing.
+
+**Per-commit `refs` array** *(one entry per ref that points directly at the
+commit; empty when no ref does, matching `git log --decorate` semantics)*:
+
+| Field     | Type     | Meaning                                                                 |
+|-----------|----------|-------------------------------------------------------------------------|
+| `name`    | string   | Short ref name (`main`, `origin/main`, `v1.0` — never `refs/heads/…`).  |
+| `type`    | string   | One of `branch` (local), `remote` (remote-tracking), `tag`, `head`.     |
+| `is_head` | boolean  | `true` for the entry that HEAD currently points at.                     |
+
+- Annotated tags decorate the commit they ultimately peel to (not the tag
+  object itself). `refs/remotes/*/HEAD` symbolic aliases are excluded.
+- When HEAD is **attached** to a branch, the matching branch entry carries
+  `is_head: true` so the UI renders `HEAD → main`. When HEAD is **detached**,
+  a dedicated entry `{ "name": "HEAD", "type": "head", "is_head": true }` is
+  attached to the commit HEAD points at.
+- Refs whose tip commit falls outside the returned window (truncated by the
+  `--max-commits` cap or unreachable in the current walk mode) simply do not
+  appear — no dangling entries. Decoration is computed regardless of walk
+  mode, so `HEAD` and its branch label are visible even in the default
+  HEAD-only mode.
+- Note the naming overlap: the **top-level `refs`** field is the walk-mode
+  string (`"head"` / `"all"`); the **per-commit `refs`** field is this
+  decoration array. Same key name, different nesting.
 
 ### `GET /api/commits/{sha}`
 
@@ -195,6 +227,42 @@ Status codes:
 Fetching commit detail is strictly read-only — no refs, objects, working tree,
 or index are modified.
 
+## Ref decoration (branch, tag & HEAD badges)
+
+Each commit that a ref points **directly** at (its tip) is decorated with one
+or more badges rendered next to its node in the graph. This makes it easy to
+answer questions like "which lane is `main`?", "where's `HEAD` right now?", or
+"where does `v1.0` point?" — the labels are the same short names you see with
+`git log --decorate`.
+
+Four badge types, distinguished by both color and a leading glyph (so the
+distinction does not rely on color alone):
+
+| Type       | Glyph | Meaning                                                                    |
+|------------|:-----:|----------------------------------------------------------------------------|
+| **branch** | `⎇`   | Local branch (`refs/heads/*`). Example: `main`, `feature/login`.           |
+| **remote** | `☁`   | Remote-tracking branch (`refs/remotes/*`). Example: `origin/main`. Dashed border. |
+| **tag**    | `⚑`   | Tag (`refs/tags/*`). Annotated tags peel to their target commit.            |
+| **HEAD**   | `◉`   | The current HEAD. Rendered with a thicker, emphasized border.               |
+
+**`HEAD → branch` indicator.** When HEAD is attached to a branch, the row's
+HEAD/branch badge is rendered as a single combined label (`HEAD → main`) with
+the emphasized HEAD styling. When HEAD is **detached** (checkout of a specific
+commit or tag), a standalone emphasized `HEAD` badge appears on the commit
+HEAD points at, alongside any other refs (tags, branches) that also decorate
+that commit.
+
+**Multiple refs on one commit.** A single commit can carry any number of
+badges — for example a release commit that is simultaneously the tip of
+`main`, `origin/main`, and `v1.0`. Badges appear in a stable order: HEAD
+first, then local branches, then remote-tracking branches, then tags. Very
+long ref names are truncated with an ellipsis; hover a badge to reveal the
+full ref name in a tooltip.
+
+Decoration is **display-only**: badges are labels, not controls, and clicking
+one falls through to open the commit detail panel just as clicking anywhere
+else on the row does.
+
 ## Commit detail panel
 
 Click any commit node or its row to open a detail panel (a modal dialog docked
@@ -236,9 +304,11 @@ tests/            # pytest suite + golden fixture repositories
 ## Scope
 
 This slice reads commits (from `HEAD` or, with `--all-refs`, from all branches
-— local and remote-tracking — and tags), renders them as a graph, and lets you
-click any commit for a detail panel (metadata + changed-file list). Rendering
-the actual diff/patch content is a separate later spec. Also out of scope for
-now: branch/tag/HEAD ref decoration (drawing ref name labels on nodes), an in-UI
-repo picker or per-branch toggles, search/filtering, and pagination beyond the
+— local and remote-tracking — and tags), renders them as a graph with
+per-commit ref badges (branches, tags, and a `HEAD → …` indicator), and lets
+you click any commit for a detail panel (metadata + changed-file list).
+Rendering the actual diff/patch content is a separate later spec. Also out of
+scope for now: in-UI toggles to filter refs (hide tags, focus a branch),
+clicking a badge to check out/navigate, ref decoration inside the detail
+panel, an in-UI repo picker, search/filtering, and pagination beyond the
 fixed cap.
