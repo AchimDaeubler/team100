@@ -54,7 +54,8 @@ ready_sha: "cc3cade1e37e145472b508cd167a817c9e195e34"
 
 completion:
   date: 2026-07-17
-  pull_requests: []
+  pull_requests:
+    - "https://github.com/AchimDaeubler/team100/pull/5"
 
 learnings:
   - type: gotcha_hit
