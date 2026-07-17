@@ -85,6 +85,14 @@ class RepoBuilder:
         else:
             self._git("checkout", "-q", branch)
 
+    def detach_head(self, target: str = "HEAD") -> None:
+        """Move to a detached HEAD at ``target`` (default: current HEAD).
+
+        Used by SPEC-004 to exercise the detached-HEAD decoration path
+        (``{name: "HEAD", type: "head", is_head: true}``).
+        """
+        self._git("checkout", "-q", "--detach", target)
+
     def orphan(self, branch: str) -> None:
         """Start a new disconnected history (root will have no parent)."""
         # Empty commits mean no tracked files, so the new branch starts clean.
@@ -273,6 +281,50 @@ def equal_timestamp_repo(tmp_path: Path) -> Path:
     b.checkout("branch-b", create=True)
     b.commit("b tip", advance=0)  # same clock as 'a tip'
     b.checkout("main")
+    return b.path
+
+
+@pytest.fixture
+def detached_head_repo(tmp_path: Path) -> Path:
+    """A repo whose HEAD is detached one commit behind ``main``'s tip.
+
+    Layout (newest first):
+      * ``main`` tip commit — carries the ``main`` branch ref
+      * detached-HEAD commit — carries ``HEAD`` (dedicated head entry, no
+        attached branch); also has a ``pin`` lightweight tag so we can prove
+        the head entry coexists with a tag entry on the same commit.
+    """
+    b = RepoBuilder(tmp_path / "detached")
+    b.commit("first")
+    detach_sha = b.commit("second (detach here)")
+    b.commit("third (main tip)")
+    b.tag("pin")  # lightweight tag on main tip — moved by checkout target below
+    # Retarget the tag to the middle commit and detach HEAD there.
+    b._git("tag", "-d", "pin")
+    b._git("tag", "pin", detach_sha)
+    b.detach_head(detach_sha)
+    return b.path
+
+
+@pytest.fixture
+def multi_ref_tip_repo(tmp_path: Path) -> Path:
+    """A single commit carrying a mix of local branch, lightweight tag, and
+    annotated tag simultaneously.
+
+    Verifies AC-5/AC-6 rendering with multiple badges on one row and
+    exercises the "one commit → multiple ref entries" branch of the
+    decoration map.
+    """
+    b = RepoBuilder(tmp_path / "multi")
+    b.commit("base")
+    tip_sha = b.commit("tip: all-refs on me")
+    b.checkout("release", create=True)
+    b.checkout("main")
+    b.tag("light-tag")
+    b.tag("v1.0", annotated=True, message="release v1.0")
+    # ``release`` is on the same commit as ``main`` because we branched off
+    # immediately after committing and never advanced it.
+    assert b._git("rev-parse", "release").strip() == tip_sha
     return b.path
 
 

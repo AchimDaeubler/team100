@@ -97,6 +97,58 @@ header h1 {
   pointer-events: none;
 }
 
+/* SPEC-004: ref decoration badges. Each badge is <g class="ref-badge ref-{type}">
+   containing a bg <rect> and a <text> label prefixed with a per-type glyph so
+   the type distinction does not rely on color alone (AC-6). pointer-events
+   is off across the group so a click on a badge still falls through to the
+   .row-hit rect underneath (SPEC-003 detail-panel interaction survives). */
+.ref-badge {
+  pointer-events: none;
+}
+.ref-badge-bg {
+  fill: var(--panel);
+  stroke-width: 1;
+}
+.ref-badge-label {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Per-type styling: distinct hue + border style (solid/dashed) so the four
+   types are distinguishable without color perception. */
+.ref-branch .ref-badge-bg {
+  stroke: #89b4fa;
+}
+.ref-branch .ref-badge-label {
+  fill: #89b4fa;
+}
+
+.ref-remote .ref-badge-bg {
+  stroke: #94e2d5;
+  stroke-dasharray: 3 2; /* dashed border cues "remote" without color alone */
+}
+.ref-remote .ref-badge-label {
+  fill: #94e2d5;
+}
+
+.ref-tag .ref-badge-bg {
+  stroke: #f9e2af;
+}
+.ref-tag .ref-badge-label {
+  fill: #f9e2af;
+}
+
+.ref-head .ref-badge-bg {
+  stroke: #a6e3a1;
+  stroke-width: 2; /* thicker border emphasizes "you are here" (AC-6). */
+  fill: #313244;   /* slightly brighter fill for extra emphasis. */
+}
+.ref-head .ref-badge-label {
+  fill: #a6e3a1;
+  font-weight: 700;
+}
+
 .sha {
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
   font-weight: 600;

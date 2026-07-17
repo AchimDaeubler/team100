@@ -13,6 +13,10 @@ const LANE_W = 16; // horizontal spacing between lanes
 const PAD_X = 16; // left padding before lane 0
 const NODE_R = 4.5; // commit node radius
 const TEXT_GAP = 18; // gap between the lane area and the text column
+const BADGE_GAP = 6; // gap between adjacent badges and between badges & subject
+const BADGE_PAD_X = 6; // horizontal padding inside a badge
+const BADGE_H = 16; // badge height
+const BADGE_MAX_CH = 22; // max characters shown per badge before ellipsis
 
 function laneX(lane) {
   return PAD_X + lane * LANE_W;
@@ -64,6 +68,110 @@ function edgePath(cX, cY, toX, endX, endY) {
   return d;
 }
 
+function truncateRefName(name) {
+  return name.length > BADGE_MAX_CH ? name.slice(0, BADGE_MAX_CH - 1) + "…" : name;
+}
+
+// SPEC-004: collapse an attached-HEAD's dedicated head entry into its branch
+// entry so the row renders "HEAD → main" as one combined badge. Detached
+// HEAD has no matching branch entry and stays as a standalone head badge.
+// Order (deterministic UI choice, not a git-order oracle):
+//   1. HEAD (whether combined with its branch or standalone)
+//   2. remaining local branches
+//   3. remote-tracking branches
+//   4. tags
+function orderedRefs(refs) {
+  if (!refs || refs.length === 0) return [];
+  const head = refs.find((r) => r.is_head && r.type === "branch");
+  const detached = refs.find((r) => r.type === "head");
+  const rest = refs.filter(
+    (r) => r !== head && r !== detached && r.type !== "head",
+  );
+  const buckets = { branch: [], remote: [], tag: [] };
+  for (const r of rest) if (buckets[r.type]) buckets[r.type].push(r);
+  const ordered = [];
+  if (head) ordered.push({ ...head, combinedWithHead: true });
+  else if (detached) ordered.push(detached);
+  ordered.push(...buckets.branch, ...buckets.remote, ...buckets.tag);
+  return ordered;
+}
+
+// Type-prefix glyphs give an accessibility cue that doesn't rely on color
+// (AC-6): the shape/character alone distinguishes the ref type for users
+// with color-vision differences.
+const REF_GLYPHS = {
+  branch: "⎇",  // branch fork
+  remote: "☁",  // cloud (remote)
+  tag: "⚑",     // flag/pennant (tag)
+  head: "◉",    // filled circle (HEAD pointer)
+};
+
+function refBadgeLabel(entry) {
+  if (entry.type === "head") return "HEAD";
+  if (entry.combinedWithHead) return `HEAD → ${truncateRefName(entry.name)}`;
+  // Prefix tags with "tag:" — matches `git log --decorate` and gives a text
+  // cue that branch vs tag no longer relies on the glyph rendering
+  // correctly (AC-6 accessibility: some fonts render ⎇/⚑ as tofu).
+  if (entry.type === "tag") return `tag: ${truncateRefName(entry.name)}`;
+  return truncateRefName(entry.name);
+}
+
+function refBadgeClass(entry) {
+  if (entry.type === "head" || entry.combinedWithHead) return "ref-badge ref-head";
+  return `ref-badge ref-${entry.type}`;
+}
+
+// Render one row's badges starting at ``x``, return the width consumed
+// (badges + trailing gap) so the caller can shift the subject to the right.
+function renderRefBadges(svg, refs, xStart, y) {
+  const ordered = orderedRefs(refs);
+  if (ordered.length === 0) return 0;
+  let x = xStart;
+  for (const entry of ordered) {
+    const label = refBadgeLabel(entry);
+    const cls = refBadgeClass(entry);
+    const glyph = REF_GLYPHS[entry.type] || "";
+    const groupY = y - BADGE_H / 2;
+    const g = el("g", { class: cls });
+    const rect = el("rect", {
+      class: "ref-badge-bg",
+      x,
+      y: groupY,
+      height: BADGE_H,
+      rx: 3,
+      ry: 3,
+    });
+    g.appendChild(rect);
+    const text = el(
+      "text",
+      {
+        class: "ref-badge-label",
+        x: x + BADGE_PAD_X,
+        y,
+        "dominant-baseline": "central",
+      },
+      `${glyph} ${label}`,
+    );
+    g.appendChild(text);
+    // Full-text tooltip so a truncated badge still reveals its full ref name.
+    g.appendChild(el("title", {}, `${entry.type}: ${entry.name}${entry.is_head ? " (HEAD)" : ""}`));
+    svg.appendChild(g);
+    // Measure after insertion (text is now in the layout tree) and size the
+    // rect to fit; fall back to a character-based estimate if measurement is
+    // unavailable (e.g. detached testing envs).
+    let textWidth;
+    try {
+      textWidth = text.getComputedTextLength();
+    } catch {
+      textWidth = (`${glyph} ${label}`).length * 6.5;
+    }
+    const w = Math.max(textWidth + BADGE_PAD_X * 2, BADGE_H);
+    rect.setAttribute("width", w);
+    x += w + BADGE_GAP;
+  }
+  return x - xStart;
+}
+
 function render(data) {
   document.getElementById("repo").textContent = data.repo || "";
   const graph = document.getElementById("graph");
@@ -82,10 +190,20 @@ function render(data) {
   const graphWidth = laneX(laneCount - 1) + PAD_X;
   const textX = graphWidth + TEXT_GAP;
   const height = commits.length * ROW_H;
-  const width = Math.max(textX + 640, 900);
+  // Provisional width; recomputed below once badge extent is known so the
+  // meta column (right-anchored at ``width - 12``) never collides with the
+  // shifted subject text.
+  let width = Math.max(textX + 640, 900);
   const bottomY = height;
 
   const svg = el("svg", { width, height, viewBox: `0 0 ${width} ${height}` });
+  // Attach the SVG to the DOM BEFORE rendering the per-row content: SPEC-004
+  // badge sizing calls ``getComputedTextLength()`` to measure variable-width
+  // ref names, and that only returns a real width once the text element is
+  // in the layout tree. If we defer the attach to the end (SPEC-001's
+  // original approach) every badge collapses to the fallback size and the
+  // subject text overlaps the badges.
+  graph.appendChild(svg);
 
   // Edges first (drawn behind the nodes).
   commits.forEach((c) => {
@@ -109,7 +227,17 @@ function render(data) {
     });
   });
 
-  // Row hit areas + nodes + text.
+  // SPEC-004: badges are anchored to each commit's lane node (labels-in-graph
+  // layout — like gitk/GitLens-classic). Because badge widths vary by row,
+  // the text column (sha/subject/meta) must shift right past the widest
+  // badge extent across all rows so labels never collide with the text
+  // column. Two passes:
+  //   Pass 1 — render row hit-areas, nodes, and badges (measured in-DOM).
+  //            Track maxBadgeRight = max over rows of (nodeX + badgeWidth).
+  //   Pass 2 — render sha/subject/meta at shaX = max(textX, maxBadgeRight + gap).
+  const badgeAnchorGap = LANE_W / 2 + NODE_R; // clearance from node
+  let maxBadgeRight = 0;
+
   commits.forEach((c, i) => {
     const y = rowY(i);
     const hit = el("rect", {
@@ -128,14 +256,82 @@ function render(data) {
 
     svg.appendChild(el("circle", { class: "node", "data-sha": c.sha, cx: laneX(c.lane), cy: y, r: NODE_R, fill: c.color }));
 
-    svg.appendChild(el("text", { class: "sha", x: textX, y, "dominant-baseline": "central", fill: c.color }, c.short_sha));
-    svg.appendChild(el("text", { class: "subject", x: textX + 64, y, "dominant-baseline": "central" }, c.subject));
-    svg.appendChild(
-      el("text", { class: "meta", x: width - 12, y, "dominant-baseline": "central", "text-anchor": "end" }, `${c.author_name} · ${fmtDate(c.authored_timestamp)}`)
-    );
+    if (c.refs && c.refs.length) {
+      const badgeStart = laneX(c.lane) + badgeAnchorGap;
+      const badgesWidth = renderRefBadges(svg, c.refs, badgeStart, y);
+      const rightEdge = badgeStart + badgesWidth;
+      if (rightEdge > maxBadgeRight) maxBadgeRight = rightEdge;
+    }
   });
 
-  graph.appendChild(svg);
+  const shaX = Math.max(textX, maxBadgeRight + TEXT_GAP);
+  const subjectX = shaX + 64;
+
+  // Fit the SVG to the available viewport width (with a floor for very
+  // narrow windows) so the subject column can breathe when there's room and
+  // the meta column stays right-anchored without overlapping. Fall back to a
+  // provisional width if the container hasn't laid out yet.
+  const availableWidth = graph.clientWidth || document.documentElement.clientWidth || 900;
+  const targetWidth = Math.max(availableWidth, subjectX + 320);
+  if (targetWidth !== width) {
+    width = targetWidth;
+    svg.setAttribute("width", width);
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg
+      .querySelectorAll("rect.row-hit")
+      .forEach((r) => r.setAttribute("width", width));
+  }
+
+  // Pass 2a — render the meta text (author · date, right-anchored) and
+  // measure each row's width so we know how much space the subject has left
+  // on each row. Take the max meta width to guarantee columnar alignment:
+  // the subject is truncated to the same right-edge on every row.
+  const metaRight = width - 12;
+  const metaTexts = commits.map((c, i) => {
+    const y = rowY(i);
+    const node = el(
+      "text",
+      { class: "meta", x: metaRight, y, "dominant-baseline": "central", "text-anchor": "end" },
+      `${c.author_name} · ${fmtDate(c.authored_timestamp)}`,
+    );
+    svg.appendChild(node);
+    return node;
+  });
+  let maxMetaWidth = 0;
+  for (const node of metaTexts) {
+    let w = 0;
+    try { w = node.getComputedTextLength(); } catch { w = 0; }
+    if (w > maxMetaWidth) maxMetaWidth = w;
+  }
+  const subjectMaxWidth = Math.max(metaRight - maxMetaWidth - 24 - subjectX, 60);
+
+  // Pass 2b — sha + subject text (truncated to the shared subjectMaxWidth
+  // so no row overlaps the meta column).
+  commits.forEach((c, i) => {
+    const y = rowY(i);
+    svg.appendChild(el("text", { class: "sha", x: shaX, y, "dominant-baseline": "central", fill: c.color }, c.short_sha));
+    const subj = el(
+      "text",
+      { class: "subject", x: subjectX, y, "dominant-baseline": "central" },
+      c.subject,
+    );
+    svg.appendChild(subj);
+    // Full subject in a <title> so a truncated row still reveals its full
+    // text on hover (mirrors the ref-badge tooltip pattern).
+    let subjectWidth = 0;
+    try { subjectWidth = subj.getComputedTextLength(); } catch { subjectWidth = 0; }
+    if (subjectWidth > subjectMaxWidth) {
+      // Character-based binary trim — cheap and good enough since the font
+      // is proportional; add a tooltip so the untruncated text remains
+      // discoverable.
+      let s = c.subject;
+      while (s.length > 1 && subj.getComputedTextLength() > subjectMaxWidth) {
+        s = s.slice(0, -1);
+        subj.textContent = s + "…";
+      }
+      subj.appendChild(el("title", {}, c.subject));
+    }
+  });
 }
 
 function showError(message) {

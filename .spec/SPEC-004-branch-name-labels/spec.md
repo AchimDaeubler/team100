@@ -2,7 +2,7 @@
 id: SPEC-004
 title: "Ref decoration: branch, tag, and HEAD labels on the commit graph"
 category: feature
-owner: achim.daeubler                         # git config user.name
+owner: Max Nigsch                         # git config user.name
 authored_by: augmented                # augmented | automated
 ---
 
